@@ -26,163 +26,19 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- GERENCIAMENTO DE BANCO DE DADOS DE USUÁRIOS (JSON COM STATUS) ---
-ARQUIVO_USUARIOS = "usuarios.json"
-
-def carregar_usuarios():
-    """Retorna um dicionário no formato: {"usuario": {"senha": "...", "status": "aprovado"/"pendente"}}"""
-    if not os.path.exists(ARQUIVO_USUARIOS):
-        dados_iniciais = {
-            USUARIO_ADMIN: {"senha": "admin123", "status": "aprovado"},
-            "operador": {"senha": "recorte2026", "status": "aprovado"}
-        }
-        with open(ARQUIVO_USUARIOS, "w") as f:
-            json.dump(dados_iniciais, f, indent=4)
-        return dados_iniciais
-    try:
-        with open(ARQUIVO_USUARIOS, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {USUARIO_ADMIN: {"senha": "admin123", "status": "aprovado"}}
-
-def salvar_usuarios_dict(usuarios):
-    with open(ARQUIVO_USUARIOS, "w") as f:
-        json.dump(usuarios, f, indent=4)
-
-def solicitar_novo_cadastro(usuario, senha):
-    usuarios = carregar_usuarios()
-    usuarios[usuario.strip().lower()] = {
-        "senha": senha,
-        "status": "pendente"
-    }
-    salvar_usuarios_dict(usuarios)
-
-def alterar_status_usuario(usuario, novo_status):
-    usuarios = carregar_usuarios()
-    if usuario in usuarios:
-        if novo_status == "excluir":
-            del usuarios[usuario]
-        else:
-            usuarios[usuario]["status"] = novo_status
-        salvar_usuarios_dict(usuarios)
-
-# --- ESTADO DA SESSÃO / AUTENTICAÇÃO ---
-if "autenticado" not in st.session_state:
-    st.session_state.autenticado = False
-if "usuario_logado" not in st.session_state:
-    st.session_state.usuario_logado = ""
-
-# --- TELA DE LOGIN & CADASTRO DE USUÁRIOS ---
-if not st.session_state.autenticado:
-    st.markdown(f"""
-        <style>
-        .stApp {{ background-color: {COR_GRAFITE}; color: {COR_TEXTO}; }}
-        .stButton>button {{
-            background: linear-gradient(90deg, {COR_LARANJA} 0%, #d88100 100%) !important;
-            color: #FFFFFF !important; font-weight: bold !important; border: none !important;
-        }}
-        </style>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 1.8, 1])
-
-    with col2:
-        st.markdown(f"""
-            <div style="background-color: {COR_FUNDO_CARD}; padding: 25px; border-radius: 12px; border: 1px solid #444340; text-align: center;">
-                <h2 style="color: {COR_LARANJA}; margin-bottom: 5px;">✂️ Sistema de Recorte</h2>
-                <p style="color: #aaaaaa; font-size: 14px; margin:0;">Acesse com sua conta ou crie um novo cadastro</p>
-            </div>
-        """, unsafe_allow_html=True)
-
-        tab_login, tab_cadastro = st.tabs(["🔑 Entrar", "📝 Criar Conta"])
-
-        usuarios_cadastrados = carregar_usuarios()
-
-        # TAB 1: LOGIN
-        with tab_login:
-            with st.form("form_login"):
-                usuario_input = st.text_input("Usuário").strip().lower()
-                senha_input = st.text_input("Senha", type="password")
-                btn_entrar = st.form_submit_button("Acessar Plataforma", use_container_width=True)
-
-                if btn_entrar:
-                    if usuario_input in usuarios_cadastrados:
-                        dados_usr = usuarios_cadastrados[usuario_input]
-                        # Compatibilidade caso venha de versão antiga onde só tinha string de senha
-                        senha_cadastrada = dados_usr["senha"] if isinstance(dados_usr, dict) else dados_usr
-                        status_cadastrado = dados_usr.get("status", "aprovado") if isinstance(dados_usr, dict) else "aprovado"
-
-                        if senha_cadastrada == senha_input:
-                            if status_cadastrado == "aprovado":
-                                st.session_state.autenticado = True
-                                st.session_state.usuario_logado = usuario_input
-                                st.success("Login realizado!")
-                                st.rerun()
-                            else:
-                                st.warning("⏳ Sua conta ainda está aguardando aprovação do administrador.")
-                        else:
-                            st.error("Usuário ou senha incorretos.")
-                    else:
-                        st.error("Usuário ou senha incorretos.")
-
-        # TAB 2: CRIAR CONTA (SOLICITAR ACESSO)
-        with tab_cadastro:
-            with st.form("form_cadastro"):
-                novo_usuario = st.text_input("Escolha um Nome de Usuário").strip().lower()
-                nova_senha = st.text_input("Escolha uma Senha", type="password")
-                confirma_senha = st.text_input("Confirme a Senha", type="password")
-                btn_cadastrar = st.form_submit_button("Solicitar Cadastro", use_container_width=True)
-
-                if btn_cadastrar:
-                    if not novo_usuario or not nova_senha:
-                        st.warning("Preencha todos os campos.")
-                    elif novo_usuario in usuarios_cadastrados:
-                        st.error("Este nome de usuário já existe.")
-                    elif nova_senha != confirma_senha:
-                        st.error("As senhas não coincidem.")
-                    else:
-                        solicitar_novo_cadastro(novo_usuario, nova_senha)
-                        st.success("✅ Solicitação enviada! Aguarde a aprovação do administrador para fazer login.")
-
-    st.stop() # Bloqueia o acesso ao app até o login de uma conta aprovada
-
-# --- SISTEMA PRINCIPAL (APÓS AUTENTICAÇÃO) ---
-
-# --- FUNÇÃO PARA CONVERTER A LOGO EM BASE64 ---
-def carregar_logo_3d(caminho_logo):
-    if os.path.exists(caminho_logo):
-        with open(caminho_logo, "rb") as image_file:
-            encoded_string = base64.b64encode(image_file.read()).decode()
-        return f"""
-        <div style="display: flex; justify-content: center; align-items: center; padding: 5px;">
-            <img src="data:image/png;base64,{encoded_string}" alt="Logo" style="
-                max-width: 100%;
-                max-height: 140px;
-                object-fit: contain;
-                filter: 
-                    drop-shadow(2px 4px 6px rgba(0, 0, 0, 0.9)) 
-                    drop-shadow(0px 0px 18px rgba(243, 146, 0, 0.65)) 
-                    brightness(1.2) 
-                    contrast(1.15);
-                transform: perspective(600px) rotateX(5deg) scale(1.02);
-                transition: transform 0.3s ease, filter 0.3s ease;
-                cursor: pointer;
-            " onmouseover="
-                this.style.transform='perspective(600px) rotateX(0deg) scale(1.08)';
-                this.style.filter='drop-shadow(3px 8px 12px rgba(0, 0, 0, 1)) drop-shadow(0px 0px 28px rgba(243, 146, 0, 0.95)) brightness(1.3) contrast(1.2)';
-            " onmouseout="
-                this.style.transform='perspective(600px) rotateX(5deg) scale(1.02)';
-                this.style.filter='drop-shadow(2px 4px 6px rgba(0, 0, 0, 0.9)) drop-shadow(0px 0px 18px rgba(243, 146, 0, 0.65)) brightness(1.2) contrast(1.15)';
-            "/>
-        </div>
-        """
-    else:
-        return "<h1 style='font-size: 50px; margin:0; text-align:center;'>✂️ Logo</h1>"
-
-# --- ESTILIZAÇÃO CSS AVANÇADA ---
+# --- ESTILIZAÇÃO CSS (INCLUI REMOÇÃO DO MENU/GITHUB/EDIÇÃO DO STREAMLIT) ---
 st.markdown(f"""
     <style>
+    /* Oculta o cabeçalho superior do Streamlit (GitHub, Editar, Share, Menu de 3 pontos) */
+    header[data-testid="stHeader"] {{
+        display: none !important;
+    }}
+    
+    /* Oculta o rodapé padrão 'Made with Streamlit' */
+    footer {{
+        display: none !important;
+    }}
+
     .stApp {{
         background-color: {COR_GRAFITE};
         color: {COR_TEXTO};
@@ -255,20 +111,178 @@ st.markdown(f"""
         border: 1px solid #444340;
         margin-bottom: 15px;
     }}
+    .badge-admin {{
+        background-color: {COR_LARANJA};
+        color: #000000;
+        font-size: 11px;
+        font-weight: bold;
+        padding: 3px 8px;
+        border-radius: 12px;
+        margin-left: 5px;
+    }}
     </style>
 """, unsafe_allow_html=True)
 
-# --- BARRA LATERAL (INFORMAÇÕES DE USUÁRIO, LOGOUT E PAINEL ADMIN) ---
+# --- GERENCIAMENTO DE USUÁRIOS (JSON COM ROLE E STATUS) ---
+ARQUIVO_USUARIOS = "usuarios.json"
+
+def carregar_usuarios():
+    if not os.path.exists(ARQUIVO_USUARIOS):
+        dados_iniciais = {
+            USUARIO_ADMIN: {"senha": "admin123", "status": "aprovado", "role": "admin"},
+            "operador": {"senha": "recorte2026", "status": "aprovado", "role": "user"}
+        }
+        with open(ARQUIVO_USUARIOS, "w") as f:
+            json.dump(dados_iniciais, f, indent=4)
+        return dados_iniciais
+    try:
+        with open(ARQUIVO_USUARIOS, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {USUARIO_ADMIN: {"senha": "admin123", "status": "aprovado", "role": "admin"}}
+
+def salvar_usuarios_dict(usuarios):
+    with open(ARQUIVO_USUARIOS, "w") as f:
+        json.dump(usuarios, f, indent=4)
+
+def solicitar_novo_cadastro(usuario, senha):
+    usuarios = carregar_usuarios()
+    usuarios[usuario.strip().lower()] = {
+        "senha": senha,
+        "status": "pendente",
+        "role": "user"
+    }
+    salvar_usuarios_dict(usuarios)
+
+def alterar_status_usuario(usuario, novo_status):
+    usuarios = carregar_usuarios()
+    if usuario in usuarios:
+        if novo_status == "excluir":
+            del usuarios[usuario]
+        else:
+            usuarios[usuario]["status"] = novo_status
+        salvar_usuarios_dict(usuarios)
+
+# --- ESTADO DA SESSÃO ---
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+if "usuario_logado" not in st.session_state:
+    st.session_state.usuario_logado = ""
+
+# --- TELA DE LOGIN & CADASTRO ---
+if not st.session_state.autenticado:
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1.8, 1])
+
+    with col2:
+        st.markdown(f"""
+            <div style="background-color: {COR_FUNDO_CARD}; padding: 25px; border-radius: 12px; border: 1px solid #444340; text-align: center;">
+                <h2 style="color: {COR_LARANJA}; margin-bottom: 5px;">✂️ Sistema de Recorte</h2>
+                <p style="color: #aaaaaa; font-size: 14px; margin:0;">Acesse com sua conta ou crie um novo cadastro</p>
+            </div>
+        """, unsafe_allow_html=True)
+
+        tab_login, tab_cadastro = st.tabs(["🔑 Entrar", "📝 Criar Conta"])
+        usuarios_cadastrados = carregar_usuarios()
+
+        # TAB 1: LOGIN
+        with tab_login:
+            with st.form("form_login"):
+                usuario_input = st.text_input("Usuário").strip().lower()
+                senha_input = st.text_input("Senha", type="password")
+                btn_entrar = st.form_submit_button("Acessar Plataforma", use_container_width=True)
+
+                if btn_entrar:
+                    if usuario_input in usuarios_cadastrados:
+                        dados_usr = usuarios_cadastrados[usuario_input]
+                        senha_cadastrada = dados_usr["senha"] if isinstance(dados_usr, dict) else dados_usr
+                        status_cadastrado = dados_usr.get("status", "aprovado") if isinstance(dados_usr, dict) else "aprovado"
+
+                        if senha_cadastrada == senha_input:
+                            if status_cadastrado == "aprovado":
+                                st.session_state.autenticado = True
+                                st.session_state.usuario_logado = usuario_input
+                                st.success("Login realizado!")
+                                st.rerun()
+                            else:
+                                st.warning("⏳ Sua conta ainda está aguardando aprovação do administrador.")
+                        else:
+                            st.error("Usuário ou senha incorretos.")
+                    else:
+                        st.error("Usuário ou senha incorretos.")
+
+        # TAB 2: CRIAR CONTA
+        with tab_cadastro:
+            with st.form("form_cadastro"):
+                novo_usuario = st.text_input("Escolha um Nome de Usuário").strip().lower()
+                nova_senha = st.text_input("Escolha uma Senha", type="password")
+                confirma_senha = st.text_input("Confirme a Senha", type="password")
+                btn_cadastrar = st.form_submit_button("Solicitar Cadastro", use_container_width=True)
+
+                if btn_cadastrar:
+                    if not novo_usuario or not nova_senha:
+                        st.warning("Preencha todos os campos.")
+                    elif novo_usuario in usuarios_cadastrados:
+                        st.error("Este nome de usuário já existe.")
+                    elif nova_senha != confirma_senha:
+                        st.error("As senhas não coincidem.")
+                    else:
+                        solicitar_novo_cadastro(novo_usuario, nova_senha)
+                        st.success("✅ Solicitação enviada! Aguarde a aprovação do administrador.")
+
+    st.stop()
+
+# --- SISTEMA PRINCIPAL ---
+
+# --- FUNÇÃO LOGO BASE64 ---
+def carregar_logo_3d(caminho_logo):
+    if os.path.exists(caminho_logo):
+        with open(caminho_logo, "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode()
+        return f"""
+        <div style="display: flex; justify-content: center; align-items: center; padding: 5px;">
+            <img src="data:image/png;base64,{encoded_string}" alt="Logo" style="
+                max-width: 100%;
+                max-height: 140px;
+                object-fit: contain;
+                filter: 
+                    drop-shadow(2px 4px 6px rgba(0, 0, 0, 0.9)) 
+                    drop-shadow(0px 0px 18px rgba(243, 146, 0, 0.65)) 
+                    brightness(1.2) 
+                    contrast(1.15);
+                transform: perspective(600px) rotateX(5deg) scale(1.02);
+                transition: transform 0.3s ease, filter 0.3s ease;
+                cursor: pointer;
+            " onmouseover="
+                this.style.transform='perspective(600px) rotateX(0deg) scale(1.08)';
+                this.style.filter='drop-shadow(3px 8px 12px rgba(0, 0, 0, 1)) drop-shadow(0px 0px 28px rgba(243, 146, 0, 0.95)) brightness(1.3) contrast(1.2)';
+            " onmouseout="
+                this.style.transform='perspective(600px) rotateX(5deg) scale(1.02)';
+                this.style.filter='drop-shadow(2px 4px 6px rgba(0, 0, 0, 0.9)) drop-shadow(0px 0px 18px rgba(243, 146, 0, 0.65)) brightness(1.2) contrast(1.15)';
+            "/>
+        </div>
+        """
+    else:
+        return "<h1 style='font-size: 50px; margin:0; text-align:center;'>✂️ Logo</h1>"
+
+# --- BARRA LATERAL (IDENTIFICAÇÃO DE ADMIN) ---
 with st.sidebar:
-    st.markdown(f"👤 **Usuário Ativo:** `{st.session_state.usuario_logado}`")
+    usuarios_db = carregar_usuarios()
+    dados_logado = usuarios_db.get(st.session_state.usuario_logado, {})
+    e_admin = (st.session_state.usuario_logado == USUARIO_ADMIN) or (isinstance(dados_logado, dict) and dados_logado.get("role") == "admin")
+
+    # Exibição do Usuário e Badge
+    if e_admin:
+        st.markdown(f"👤 **Usuário:** `{st.session_state.usuario_logado}` <span class='badge-admin'>👑 ADMIN</span>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"👤 **Usuário:** `{st.session_state.usuario_logado}`")
     
-    # PAINEL EXCLUSIVO DO ADMIN (DIEGO COSTA)
-    if st.session_state.usuario_logado == USUARIO_ADMIN:
+    # Painel exclusivo do Admin
+    if e_admin:
         st.markdown("---")
-        st.markdown("### 👑 Painel Admin (Aprovações)")
+        st.markdown("### 👑 Painel de Aprovação")
         
-        todos_usuarios = carregar_usuarios()
-        pendentes = {u: d for u, d in todos_usuarios.items() if isinstance(d, dict) and d.get("status") == "pendente"}
+        pendentes = {u: d for u, d in usuarios_db.items() if isinstance(d, dict) and d.get("status") == "pendente"}
         
         if pendentes:
             st.warning(f"**{len(pendentes)}** solicitação(ões) pendente(s):")
@@ -294,12 +308,11 @@ with st.sidebar:
         st.session_state.usuario_logado = ""
         st.rerun()
 
-# --- CABEÇALHO COM LOGO E TÍTULO PRINCIPAL ---
+# --- CABEÇALHO ---
 col_header_logo, col_header_text = st.columns([1.5, 4])
 
 with col_header_logo:
-    html_logo = carregar_logo_3d("logo.png")
-    st.markdown(html_logo, unsafe_allow_html=True)
+    st.markdown(carregar_logo_3d("logo.png"), unsafe_allow_html=True)
 
 with col_header_text:
     st.markdown("""
@@ -313,7 +326,7 @@ with col_header_text:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# --- CAMINHO AUTOMÁTICO DO TESSERACT ---
+# --- CAMINHO TESSERACT ---
 if platform.system() == "Windows":
     caminho_tesseract = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
     if os.path.exists(caminho_tesseract):
@@ -323,11 +336,11 @@ if platform.system() == "Windows":
 else:
     pytesseract.pytesseract.tesseract_cmd = "tesseract"
 
-# --- CARREGAR MODELO YOLO ---
+# --- MODELO YOLO ---
 @st.cache_resource
 def carregar_modelo():
     if not os.path.exists("best.pt"):
-        st.error("⚠️ O arquivo 'best.pt' não foi encontrado na pasta do projeto.")
+        st.error("⚠️ O arquivo 'best.pt' não foi encontrado.")
         st.stop()
     return YOLO("best.pt")
 
@@ -339,13 +352,13 @@ except Exception as e:
 
 TERMOS_CHAVE = ["claro", "embratel", "sgp", "ctrl", "patrimonio", "propriedade"]
 
-# --- ESTADO DA SESSÃO DOS RECORTES ---
+# --- FILAS ---
 if "fila_recortes" not in st.session_state:
     st.session_state.fila_recortes = {}
 if "duvidas_pendentes" not in st.session_state:
     st.session_state.duvidas_pendentes = {}
 
-# --- UPLOAD DE MÚLTIPLAS FOTOS E CONTADORES ---
+# --- UPLOAD DE IMAGENS ---
 col_upload, col_stats = st.columns([2.0, 1.0])
 
 with col_upload:
@@ -371,7 +384,7 @@ with col_stats:
         </div>
     """, unsafe_allow_html=True)
 
-# --- BOTÃO DE AÇÃO PRINCIPAL ---
+# --- PROCESSAMENTO ---
 if arquivos_enviados:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🚀 INICIAR PROCESSAMENTO DAS FOTOS", use_container_width=True):
@@ -392,7 +405,6 @@ if arquivos_enviados:
                 continue
             h_img, w_img, _ = img.shape
             
-            # Detecção YOLO
             resultados = model(img, conf=0.35, verbose=False)
             candidatas = []
             
@@ -448,11 +460,11 @@ if arquivos_enviados:
         status_texto.success(f"🎉 Processamento concluído com sucesso!")
         st.rerun()
 
-# --- PAINEL DE RESOLUÇÃO DE DÚVIDAS ---
+# --- DÚVIDAS MANUAIS ---
 if st.session_state.duvidas_pendentes:
     st.markdown("---")
     st.markdown("### ⚠️ Decisões Manuais Necessárias")
-    st.write("A IA encontrou múltiplas etiquetas em algumas fotos. Clique na opção correta para cada uma:")
+    st.write("A IA encontrou múltiplas etiquetas em algumas fotos. Clique na opção correta:")
     
     fotos_com_duvida = list(st.session_state.duvidas_pendentes.keys())
     
@@ -468,7 +480,7 @@ if st.session_state.duvidas_pendentes:
         for idx, cand in enumerate(candidatas):
             cx1, cy1, cx2, cy2 = cand['coords']
             cy1_m, cy2_m = max(0, cy1 - 10), min(h_img, cy2 + 10)
-            cx1_m, cx2_m = max(0, cx1 - 10), min(h_img, cy2 + 10)
+            cx1_m, cx2_m = max(0, cx1 - 10), min(h_img, cx2 + 10)
             crop_opcao = img[cy1_m:cy2_m, cx1_m:cx2_m]
             crop_rgb = cv2.cvtColor(crop_opcao, cv2.COLOR_BGR2RGB)
             
@@ -485,15 +497,13 @@ if st.session_state.duvidas_pendentes:
                     del st.session_state.duvidas_pendentes[nome_foto]
                     st.rerun()
 
-# --- GALERIA DE RESULTADOS & DOWNLOADS ---
+# --- GALERIA E DOWNLOADS ---
 if st.session_state.fila_recortes:
     st.markdown("---")
-    
     col_titulo, col_dl_zip = st.columns([2.5, 1.5])
     with col_titulo:
         st.markdown(f"### 📥 Recortes Prontos ({len(st.session_state.fila_recortes)})")
     
-    # Gerar arquivo ZIP
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
         for nome_foto, bytes_img in st.session_state.fila_recortes.items():
@@ -510,7 +520,6 @@ if st.session_state.fila_recortes:
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # Exibição da Galeria em Grid
     recortes_prontos = st.session_state.fila_recortes
     colunas_galeria = st.columns(4)
     
@@ -529,7 +538,7 @@ if st.session_state.fila_recortes:
             )
             st.markdown('</div>', unsafe_allow_html=True)
 
-# --- RODAPÉ PROFISSIONAL ---
+# --- RODAPÉ ---
 st.markdown("<br><br>", unsafe_allow_html=True)
 st.markdown("---")
 st.markdown(
