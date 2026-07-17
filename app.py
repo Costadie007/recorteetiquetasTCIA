@@ -8,6 +8,7 @@ import os
 import zipfile
 import io
 import base64
+import json
 
 # --- PALETA DE CORES PERSONALIZADA ---
 COR_GRAFITE = "#2A2927"
@@ -22,7 +23,107 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- FUNÇÃO PARA CONVERTER A LOGO EM BASE64 COM TAMANHO MAIOR ---
+# --- GERENCIAMENTO DE BANCO DE DADOS DE USUÁRIOS (JSON) ---
+ARQUIVO_USUARIOS = "usuarios.json"
+
+def carregar_usuarios():
+    if not os.path.exists(ARQUIVO_USUARIOS):
+        # Usuários padrão de fábrica caso o arquivo não exista
+        dados_iniciais = {
+            "diego.costa": "admin123",
+            "operador": "tcia2026"
+        }
+        with open(ARQUIVO_USUARIOS, "w") as f:
+            json.dump(dados_iniciais, f)
+        return dados_iniciais
+    try:
+        with open(ARQUIVO_USUARIOS, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {"diego.costa": "admin123"}
+
+def salvar_novo_usuario(usuario, senha):
+    usuarios = carregar_usuarios()
+    usuarios[usuario.strip().lower()] = senha
+    with open(ARQUIVO_USUARIOS, "w") as f:
+        json.dump(usuarios, f)
+
+# --- ESTADO DA SESSÃO / AUTENTICAÇÃO ---
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+if "usuario_logado" not in st.session_state:
+    st.session_state.usuario_logado = ""
+
+# --- TELA DE LOGIN & CADASTRO DE USUÁRIOS ---
+if not st.session_state.autenticado:
+    st.markdown(f"""
+        <style>
+        .stApp {{ background-color: {COR_GRAFITE}; color: {COR_TEXTO}; }}
+        .stButton>button {{
+            background: linear-gradient(90deg, {COR_LARANJA} 0%, #d88100 100%) !important;
+            color: #FFFFFF !important; font-weight: bold !important; border: none !important;
+        }}
+        </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1.8, 1])
+
+    with col2:
+        st.markdown(f"""
+            <div style="background-color: {COR_FUNDO_CARD}; padding: 25px; border-radius: 12px; border: 1px solid #444340; text-align: center;">
+                <h2 style="color: {COR_LARANJA}; margin-bottom: 5px;">✂️ TCIA Crop</h2>
+                <p style="color: #aaaaaa; font-size: 14px; margin:0;">Acesse com sua conta ou crie um novo cadastro</p>
+            </div>
+        """, unsafe_allow_html=True)
+
+        tab_login, tab_cadastro = st.tabs(["🔑 Entrar", "📝 Criar Conta"])
+
+        usuarios_cadastrados = carregar_usuarios()
+
+        # TAB 1: LOGIN
+        with tab_login:
+            with st.form("form_login"):
+                usuario_input = st.text_input("Usuário").strip().lower()
+                senha_input = st.text_input("Senha", type="password")
+                btn_entrar = st.form_submit_button("Acessar Plataforma", use_container_width=True)
+
+                if btn_entrar:
+                    if usuario_input in usuarios_cadastrados and usuarios_cadastrados[usuario_input] == senha_input:
+                        st.session_state.autenticado = True
+                        st.session_state.usuario_logado = usuario_input
+                        st.success("Login realizado!")
+                        st.rerun()
+                    else:
+                        st.error("Usuário ou senha incorretos.")
+
+        # TAB 2: CRIAR CONTA
+        with tab_cadastro:
+            with st.form("form_cadastro"):
+                novo_usuario = st.text_input("Escolha um Nome de Usuário").strip().lower()
+                nova_senha = st.text_input("Escolha uma Senha", type="password")
+                confirma_senha = st.text_input("Confirme a Senha", type="password")
+                btn_cadastrar = st.form_submit_button("Cadastrar e Entrar", use_container_width=True)
+
+                if btn_cadastrar:
+                    if not novo_usuario or not nova_senha:
+                        st.warning("Preencha todos os campos.")
+                    elif novo_usuario in usuarios_cadastrados:
+                        st.error("Este nome de usuário já está cadastrado.")
+                    elif nova_senha != confirma_senha:
+                        st.error("As senhas não coincidem.")
+                    else:
+                        salvar_novo_usuario(novo_usuario, nova_senha)
+                        st.session_state.autenticado = True
+                        st.session_state.usuario_logado = novo_usuario
+                        st.success("Conta criada com sucesso!")
+                        st.rerun()
+
+    st.stop() # Bloqueia o acesso ao app até que o login ocorra
+
+# --- SISTEMA PRINCIPAL (APÓS AUTENTICAÇÃO) ---
+
+# --- FUNÇÃO PARA CONVERTER A LOGO EM BASE64 ---
 def carregar_logo_3d(caminho_logo):
     if os.path.exists(caminho_logo):
         with open(caminho_logo, "rb") as image_file:
@@ -56,26 +157,19 @@ def carregar_logo_3d(caminho_logo):
 # --- ESTILIZAÇÃO CSS AVANÇADA ---
 st.markdown(f"""
     <style>
-    /* Fundo da Aplicação */
     .stApp {{
         background-color: {COR_GRAFITE};
         color: {COR_TEXTO};
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }}
-    
-    /* Container principal */
     div.block-container {{
         padding-top: 1.5rem;
         padding-bottom: 2rem;
         max-width: 92%;
     }}
-
-    /* Header e Títulos */
     h1, h2, h3, h4, h5, h6, p, span, label {{
         color: {COR_TEXTO} !important;
     }}
-
-    /* Cards do Painel do Lote sem corte de texto */
     .metric-card {{
         background-color: {COR_FUNDO_CARD};
         border: 1px solid #444340;
@@ -83,7 +177,6 @@ st.markdown(f"""
         padding: 12px 8px;
         text-align: center;
         box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-        overflow: visible !important;
     }}
     .metric-value {{
         font-size: 26px;
@@ -96,13 +189,7 @@ st.markdown(f"""
         font-size: 11px;
         color: #aaaaaa !important;
         letter-spacing: 0.5px;
-        white-space: normal !important;
-        word-break: break-word !important;
-        overflow: visible !important;
-        line-height: 1.2;
     }}
-
-    /* Botão Principal em Laranja */
     .stButton>button {{
         background: linear-gradient(90deg, {COR_LARANJA} 0%, #d88100 100%) !important;
         color: #FFFFFF !important;
@@ -118,8 +205,6 @@ st.markdown(f"""
         transform: translateY(-2px) !important;
         box-shadow: 0 6px 20px rgba(243, 146, 0, 0.5) !important;
     }}
-    
-    /* Botão de Download */
     .stDownloadButton>button {{
         background-color: {COR_LARANJA} !important;
         color: #FFFFFF !important;
@@ -128,25 +213,15 @@ st.markdown(f"""
         border: none !important;
         box-shadow: 0 4px 12px rgba(243, 146, 0, 0.3) !important;
     }}
-    .stDownloadButton>button:hover {{
-        background-color: #d88100 !important;
-        transform: translateY(-2px) !important;
-    }}
-    
-    /* Area de Upload */
     [data-testid="stFileUploadDropzone"] {{
         background-color: {COR_FUNDO_CARD} !important;
         border: 2px dashed {COR_LARANJA} !important;
         border-radius: 12px !important;
         padding: 25px !important;
     }}
-    
-    /* Barra de Progresso em Laranja */
     .stProgress > div > div > div > div {{
         background-color: {COR_LARANJA} !important;
     }}
-    
-    /* Cards das imagens recortadas */
     .img-card {{
         background-color: {COR_FUNDO_CARD};
         border-radius: 10px;
@@ -157,7 +232,15 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# --- CABEÇALHO COM LOGO MAIOR E TÍTULO PRINCIPAL ---
+# --- BARRA LATERAL (INFORMAÇÕES DE USUÁRIO E LOGOUT) ---
+with st.sidebar:
+    st.markdown(f"👤 **Usuário Ativo:** `{st.session_state.usuario_logado}`")
+    if st.button("🚪 Sair da Conta", use_container_width=True):
+        st.session_state.autenticado = False
+        st.session_state.usuario_logado = ""
+        st.rerun()
+
+# --- CABEÇALHO COM LOGO E TÍTULO PRINCIPAL ---
 col_header_logo, col_header_text = st.columns([1.5, 4])
 
 with col_header_logo:
@@ -202,7 +285,7 @@ except Exception as e:
 
 TERMOS_CHAVE = ["claro", "embratel", "sgp", "ctrl", "patrimonio", "propriedade"]
 
-# --- ESTADO DA SESSÃO ---
+# --- ESTADO DA SESSÃO DOS RECCORTES ---
 if "fila_recortes" not in st.session_state:
     st.session_state.fila_recortes = {}
 if "duvidas_pendentes" not in st.session_state:
@@ -331,7 +414,7 @@ if st.session_state.duvidas_pendentes:
         for idx, cand in enumerate(candidatas):
             cx1, cy1, cx2, cy2 = cand['coords']
             cy1_m, cy2_m = max(0, cy1 - 10), min(h_img, cy2 + 10)
-            cx1_m, cx2_m = max(0, cx1 - 10), min(h_img, cx2 + 10)
+            cx1_m, cx2_m = max(0, cx1 - 10), min(h_img, cy2 + 10)
             crop_opcao = img[cy1_m:cy2_m, cx1_m:cx2_m]
             crop_rgb = cv2.cvtColor(crop_opcao, cv2.COLOR_BGR2RGB)
             
@@ -391,3 +474,15 @@ if st.session_state.fila_recortes:
                 use_container_width=True
             )
             st.markdown('</div>', unsafe_allow_html=True)
+
+# --- RODAPÉ PROFISSIONAL ---
+st.markdown("<br><br>", unsafe_allow_html=True)
+st.markdown("---")
+st.markdown(
+    """
+    <div style="text-align: center; padding: 12px 0; color: #888888; font-size: 13px; letter-spacing: 0.5px;">
+        © Recortador TCIA • Desenvolvido por <strong>Diego Costa</strong>
+    </div>
+    """, 
+    unsafe_allow_html=True
+)
