@@ -18,7 +18,7 @@ COR_TEXTO = "#FFFFFF"
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
-    page_title="Recorte de Etiquetas - TCIA",
+    page_title="Recorte de Etiquetas",
     page_icon="✂️",
     layout="wide"
 )
@@ -28,10 +28,9 @@ ARQUIVO_USUARIOS = "usuarios.json"
 
 def carregar_usuarios():
     if not os.path.exists(ARQUIVO_USUARIOS):
-        # Usuários padrão de fábrica caso o arquivo não exista
         dados_iniciais = {
             "diego.costa": "admin123",
-            "operador": "tcia2026"
+            "operador": "recorte2026"
         }
         with open(ARQUIVO_USUARIOS, "w") as f:
             json.dump(dados_iniciais, f)
@@ -72,7 +71,7 @@ if not st.session_state.autenticado:
     with col2:
         st.markdown(f"""
             <div style="background-color: {COR_FUNDO_CARD}; padding: 25px; border-radius: 12px; border: 1px solid #444340; text-align: center;">
-                <h2 style="color: {COR_LARANJA}; margin-bottom: 5px;">✂️ TCIA Crop</h2>
+                <h2 style="color: {COR_LARANJA}; margin-bottom: 5px;">✂️ Sistema de Recorte</h2>
                 <p style="color: #aaaaaa; font-size: 14px; margin:0;">Acesse com sua conta ou crie um novo cadastro</p>
             </div>
         """, unsafe_allow_html=True)
@@ -130,7 +129,7 @@ def carregar_logo_3d(caminho_logo):
             encoded_string = base64.b64encode(image_file.read()).decode()
         return f"""
         <div style="display: flex; justify-content: center; align-items: center; padding: 5px;">
-            <img src="data:image/png;base64,{encoded_string}" style="
+            <img src="data:image/png;base64,{encoded_string}" alt="Logo" style="
                 max-width: 100%;
                 max-height: 140px;
                 object-fit: contain;
@@ -152,7 +151,7 @@ def carregar_logo_3d(caminho_logo):
         </div>
         """
     else:
-        return "<h1 style='font-size: 50px; margin:0; text-align:center;'>✂️</h1>"
+        return "<h1 style='font-size: 50px; margin:0; text-align:center;'>✂️ Logo</h1>"
 
 # --- ESTILIZAÇÃO CSS AVANÇADA ---
 st.markdown(f"""
@@ -250,7 +249,7 @@ with col_header_logo:
 with col_header_text:
     st.markdown("""
         <div style="padding-top: 15px;">
-            <h1 style="margin:0; font-size: 32px;">Recorte de Etiquetas - TCIA</h1>
+            <h1 style="margin:0; font-size: 32px;">Recorte de Etiquetas</h1>
             <p style="margin: 6px 0 0 0; color: #bbbbbb !important; font-size: 15px;">
                 Envie as fotos das etiquetas para processamento e recorte automático em lote.
             </p>
@@ -285,7 +284,7 @@ except Exception as e:
 
 TERMOS_CHAVE = ["claro", "embratel", "sgp", "ctrl", "patrimonio", "propriedade"]
 
-# --- ESTADO DA SESSÃO DOS RECCORTES ---
+# --- ESTADO DA SESSÃO DOS RECORTES ---
 if "fila_recortes" not in st.session_state:
     st.session_state.fila_recortes = {}
 if "duvidas_pendentes" not in st.session_state:
@@ -414,7 +413,7 @@ if st.session_state.duvidas_pendentes:
         for idx, cand in enumerate(candidatas):
             cx1, cy1, cx2, cy2 = cand['coords']
             cy1_m, cy2_m = max(0, cy1 - 10), min(h_img, cy2 + 10)
-            cx1_m, cx2_m = max(0, cx1 - 10), min(h_img, cy2 + 10)
+            cx1_m, cx2_m = max(0, cx1 - 10), min(h_img, cx2 + 10)
             crop_opcao = img[cy1_m:cy2_m, cx1_m:cx2_m]
             crop_rgb = cv2.cvtColor(crop_opcao, cv2.COLOR_BGR2RGB)
             
@@ -481,7 +480,7 @@ st.markdown("---")
 st.markdown(
     """
     <div style="text-align: center; padding: 12px 0; color: #888888; font-size: 13px; letter-spacing: 0.5px;">
-        © Recortador TCIA • Desenvolvido por <strong>Diego Costa</strong>
+        Desenvolvido por <strong>Diego Costa</strong>
     </div>
     """, 
     unsafe_allow_html=True
