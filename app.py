@@ -7,7 +7,6 @@ import platform
 import os
 import zipfile
 import io
-import base64
 import json
 
 # --- CONFIGURAÇÃO DE ADMINISTRADOR ---
@@ -26,15 +25,25 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- ESTILIZAÇÃO CSS (INCLUI REMOÇÃO DO MENU/GITHUB/EDIÇÃO DO STREAMLIT) ---
+# --- ESTILIZAÇÃO CSS (OCULTA BARRA SUPERIOR, GITHUB, EDIÇÃO E MENU DE 3 PONTOS) ---
 st.markdown(f"""
     <style>
-    /* Oculta o cabeçalho superior do Streamlit (GitHub, Editar, Share, Menu de 3 pontos) */
-    header[data-testid="stHeader"] {{
+    /* Oculta completamente a barra superior (GitHub, Lápis, Share, Menu) */
+    [data-testid="stToolbar"], 
+    [data-testid="stHeader"], 
+    header, 
+    #MainMenu {{
+        display: none !important;
+        visibility: hidden !important;
+        height: 0px !important;
+    }}
+    
+    /* Remove o espaço em branco superior deixado pelo cabeçalho do Streamlit */
+    .stApp > header {{
         display: none !important;
     }}
     
-    /* Oculta o rodapé padrão 'Made with Streamlit' */
+    /* Oculta o rodapé padrão */
     footer {{
         display: none !important;
     }}
@@ -45,7 +54,7 @@ st.markdown(f"""
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }}
     div.block-container {{
-        padding-top: 1.5rem;
+        padding-top: 1rem !important;
         padding-bottom: 2rem;
         max-width: 92%;
     }}
@@ -123,23 +132,27 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# --- GERENCIAMENTO DE USUÁRIOS (JSON COM ROLE E STATUS) ---
+# --- GERENCIAMENTO E RESET DE USUÁRIOS ---
 ARQUIVO_USUARIOS = "usuarios.json"
+
+def resetar_e_carregar_usuarios():
+    # Reinicia o arquivo JSON com as contas padrão
+    dados_padrao = {
+        USUARIO_ADMIN: {"senha": "admin123", "status": "aprovado", "role": "admin"},
+        "operador": {"senha": "recorte2026", "status": "aprovado", "role": "user"}
+    }
+    with open(ARQUIVO_USUARIOS, "w") as f:
+        json.dump(dados_padrao, f, indent=4)
+    return dados_padrao
 
 def carregar_usuarios():
     if not os.path.exists(ARQUIVO_USUARIOS):
-        dados_iniciais = {
-            USUARIO_ADMIN: {"senha": "admin123", "status": "aprovado", "role": "admin"},
-            "operador": {"senha": "recorte2026", "status": "aprovado", "role": "user"}
-        }
-        with open(ARQUIVO_USUARIOS, "w") as f:
-            json.dump(dados_iniciais, f, indent=4)
-        return dados_iniciais
+        return resetar_e_carregar_usuarios()
     try:
         with open(ARQUIVO_USUARIOS, "r") as f:
             return json.load(f)
     except Exception:
-        return {USUARIO_ADMIN: {"senha": "admin123", "status": "aprovado", "role": "admin"}}
+        return resetar_e_carregar_usuarios()
 
 def salvar_usuarios_dict(usuarios):
     with open(ARQUIVO_USUARIOS, "w") as f:
@@ -162,6 +175,11 @@ def alterar_status_usuario(usuario, novo_status):
         else:
             usuarios[usuario]["status"] = novo_status
         salvar_usuarios_dict(usuarios)
+
+# Força o reset dos usuários na inicialização
+if "usuarios_resetados" not in st.session_state:
+    resetar_e_carregar_usuarios()
+    st.session_state.usuarios_resetados = True
 
 # --- ESTADO DA SESSÃO ---
 if "autenticado" not in st.session_state:
@@ -234,36 +252,20 @@ if not st.session_state.autenticado:
 
 # --- SISTEMA PRINCIPAL ---
 
-# --- FUNÇÃO LOGO BASE64 ---
-def carregar_logo_3d(caminho_logo):
-    if os.path.exists(caminho_logo):
-        with open(caminho_logo, "rb") as image_file:
-            encoded_string = base64.b64encode(image_file.read()).decode()
-        return f"""
-        <div style="display: flex; justify-content: center; align-items: center; padding: 5px;">
-            <img src="data:image/png;base64,{encoded_string}" alt="Logo" style="
-                max-width: 100%;
-                max-height: 140px;
-                object-fit: contain;
-                filter: 
-                    drop-shadow(2px 4px 6px rgba(0, 0, 0, 0.9)) 
-                    drop-shadow(0px 0px 18px rgba(243, 146, 0, 0.65)) 
-                    brightness(1.2) 
-                    contrast(1.15);
-                transform: perspective(600px) rotateX(5deg) scale(1.02);
-                transition: transform 0.3s ease, filter 0.3s ease;
-                cursor: pointer;
-            " onmouseover="
-                this.style.transform='perspective(600px) rotateX(0deg) scale(1.08)';
-                this.style.filter='drop-shadow(3px 8px 12px rgba(0, 0, 0, 1)) drop-shadow(0px 0px 28px rgba(243, 146, 0, 0.95)) brightness(1.3) contrast(1.2)';
-            " onmouseout="
-                this.style.transform='perspective(600px) rotateX(5deg) scale(1.02)';
-                this.style.filter='drop-shadow(2px 4px 6px rgba(0, 0, 0, 0.9)) drop-shadow(0px 0px 18px rgba(243, 146, 0, 0.65)) brightness(1.2) contrast(1.15)';
-            "/>
-        </div>
-        """
-    else:
-        return "<h1 style='font-size: 50px; margin:0; text-align:center;'>✂️ Logo</h1>"
+# --- EXIBIÇÃO DE TEXTO DA LOGO ---
+def renderizar_texto_logo():
+    return f"""
+    <div style="display: flex; justify-content: center; align-items: center; padding: 10px;">
+        <h1 style="
+            color: {COR_LARANJA} !important;
+            font-size: 38px;
+            font-weight: 900;
+            letter-spacing: 3px;
+            margin: 0;
+            text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.8);
+        ">LOGO</h1>
+    </div>
+    """
 
 # --- BARRA LATERAL (IDENTIFICAÇÃO DE ADMIN) ---
 with st.sidebar:
@@ -271,7 +273,7 @@ with st.sidebar:
     dados_logado = usuarios_db.get(st.session_state.usuario_logado, {})
     e_admin = (st.session_state.usuario_logado == USUARIO_ADMIN) or (isinstance(dados_logado, dict) and dados_logado.get("role") == "admin")
 
-    # Exibição do Usuário e Badge
+    # Exibição do Usuário e Badge Visual
     if e_admin:
         st.markdown(f"👤 **Usuário:** `{st.session_state.usuario_logado}` <span class='badge-admin'>👑 ADMIN</span>", unsafe_allow_html=True)
     else:
@@ -309,14 +311,14 @@ with st.sidebar:
         st.rerun()
 
 # --- CABEÇALHO ---
-col_header_logo, col_header_text = st.columns([1.5, 4])
+col_header_logo, col_header_text = st.columns([1.2, 4])
 
 with col_header_logo:
-    st.markdown(carregar_logo_3d("logo.png"), unsafe_allow_html=True)
+    st.markdown(renderizar_texto_logo(), unsafe_allow_html=True)
 
 with col_header_text:
     st.markdown("""
-        <div style="padding-top: 15px;">
+        <div style="padding-top: 5px;">
             <h1 style="margin:0; font-size: 32px;">Recorte de Etiquetas</h1>
             <p style="margin: 6px 0 0 0; color: #bbbbbb !important; font-size: 15px;">
                 Envie as fotos das etiquetas para processamento e recorte automático em lote.
