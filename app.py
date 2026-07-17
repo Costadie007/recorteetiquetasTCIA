@@ -10,6 +10,9 @@ import io
 import base64
 import json
 
+# --- CONFIGURAÇÃO DE ADMINISTRADOR ---
+USUARIO_ADMIN = "diego.costa"
+
 # --- PALETA DE CORES PERSONALIZADA ---
 COR_GRAFITE = "#2A2927"
 COR_LARANJA = "#F39200"
@@ -23,29 +26,45 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- GERENCIAMENTO DE BANCO DE DADOS DE USUÁRIOS (JSON) ---
+# --- GERENCIAMENTO DE BANCO DE DADOS DE USUÁRIOS (JSON COM STATUS) ---
 ARQUIVO_USUARIOS = "usuarios.json"
 
 def carregar_usuarios():
+    """Retorna um dicionário no formato: {"usuario": {"senha": "...", "status": "aprovado"/"pendente"}}"""
     if not os.path.exists(ARQUIVO_USUARIOS):
         dados_iniciais = {
-            "diego.costa": "admin123",
-            "operador": "recorte2026"
+            USUARIO_ADMIN: {"senha": "admin123", "status": "aprovado"},
+            "operador": {"senha": "recorte2026", "status": "aprovado"}
         }
         with open(ARQUIVO_USUARIOS, "w") as f:
-            json.dump(dados_iniciais, f)
+            json.dump(dados_iniciais, f, indent=4)
         return dados_iniciais
     try:
         with open(ARQUIVO_USUARIOS, "r") as f:
             return json.load(f)
     except Exception:
-        return {"diego.costa": "admin123"}
+        return {USUARIO_ADMIN: {"senha": "admin123", "status": "aprovado"}}
 
-def salvar_novo_usuario(usuario, senha):
-    usuarios = carregar_usuarios()
-    usuarios[usuario.strip().lower()] = senha
+def salvar_usuarios_dict(usuarios):
     with open(ARQUIVO_USUARIOS, "w") as f:
-        json.dump(usuarios, f)
+        json.dump(usuarios, f, indent=4)
+
+def solicitar_novo_cadastro(usuario, senha):
+    usuarios = carregar_usuarios()
+    usuarios[usuario.strip().lower()] = {
+        "senha": senha,
+        "status": "pendente"
+    }
+    salvar_usuarios_dict(usuarios)
+
+def alterar_status_usuario(usuario, novo_status):
+    usuarios = carregar_usuarios()
+    if usuario in usuarios:
+        if novo_status == "excluir":
+            del usuarios[usuario]
+        else:
+            usuarios[usuario]["status"] = novo_status
+        salvar_usuarios_dict(usuarios)
 
 # --- ESTADO DA SESSÃO / AUTENTICAÇÃO ---
 if "autenticado" not in st.session_state:
@@ -88,37 +107,45 @@ if not st.session_state.autenticado:
                 btn_entrar = st.form_submit_button("Acessar Plataforma", use_container_width=True)
 
                 if btn_entrar:
-                    if usuario_input in usuarios_cadastrados and usuarios_cadastrados[usuario_input] == senha_input:
-                        st.session_state.autenticado = True
-                        st.session_state.usuario_logado = usuario_input
-                        st.success("Login realizado!")
-                        st.rerun()
+                    if usuario_input in usuarios_cadastrados:
+                        dados_usr = usuarios_cadastrados[usuario_input]
+                        # Compatibilidade caso venha de versão antiga onde só tinha string de senha
+                        senha_cadastrada = dados_usr["senha"] if isinstance(dados_usr, dict) else dados_usr
+                        status_cadastrado = dados_usr.get("status", "aprovado") if isinstance(dados_usr, dict) else "aprovado"
+
+                        if senha_cadastrada == senha_input:
+                            if status_cadastrado == "aprovado":
+                                st.session_state.autenticado = True
+                                st.session_state.usuario_logado = usuario_input
+                                st.success("Login realizado!")
+                                st.rerun()
+                            else:
+                                st.warning("⏳ Sua conta ainda está aguardando aprovação do administrador.")
+                        else:
+                            st.error("Usuário ou senha incorretos.")
                     else:
                         st.error("Usuário ou senha incorretos.")
 
-        # TAB 2: CRIAR CONTA
+        # TAB 2: CRIAR CONTA (SOLICITAR ACESSO)
         with tab_cadastro:
             with st.form("form_cadastro"):
                 novo_usuario = st.text_input("Escolha um Nome de Usuário").strip().lower()
                 nova_senha = st.text_input("Escolha uma Senha", type="password")
                 confirma_senha = st.text_input("Confirme a Senha", type="password")
-                btn_cadastrar = st.form_submit_button("Cadastrar e Entrar", use_container_width=True)
+                btn_cadastrar = st.form_submit_button("Solicitar Cadastro", use_container_width=True)
 
                 if btn_cadastrar:
                     if not novo_usuario or not nova_senha:
                         st.warning("Preencha todos os campos.")
                     elif novo_usuario in usuarios_cadastrados:
-                        st.error("Este nome de usuário já está cadastrado.")
+                        st.error("Este nome de usuário já existe.")
                     elif nova_senha != confirma_senha:
                         st.error("As senhas não coincidem.")
                     else:
-                        salvar_novo_usuario(novo_usuario, nova_senha)
-                        st.session_state.autenticado = True
-                        st.session_state.usuario_logado = novo_usuario
-                        st.success("Conta criada com sucesso!")
-                        st.rerun()
+                        solicitar_novo_cadastro(novo_usuario, nova_senha)
+                        st.success("✅ Solicitação enviada! Aguarde a aprovação do administrador para fazer login.")
 
-    st.stop() # Bloqueia o acesso ao app até que o login ocorra
+    st.stop() # Bloqueia o acesso ao app até o login de uma conta aprovada
 
 # --- SISTEMA PRINCIPAL (APÓS AUTENTICAÇÃO) ---
 
@@ -231,9 +258,37 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# --- BARRA LATERAL (INFORMAÇÕES DE USUÁRIO E LOGOUT) ---
+# --- BARRA LATERAL (INFORMAÇÕES DE USUÁRIO, LOGOUT E PAINEL ADMIN) ---
 with st.sidebar:
     st.markdown(f"👤 **Usuário Ativo:** `{st.session_state.usuario_logado}`")
+    
+    # PAINEL EXCLUSIVO DO ADMIN (DIEGO COSTA)
+    if st.session_state.usuario_logado == USUARIO_ADMIN:
+        st.markdown("---")
+        st.markdown("### 👑 Painel Admin (Aprovações)")
+        
+        todos_usuarios = carregar_usuarios()
+        pendentes = {u: d for u, d in todos_usuarios.items() if isinstance(d, dict) and d.get("status") == "pendente"}
+        
+        if pendentes:
+            st.warning(f"**{len(pendentes)}** solicitação(ões) pendente(s):")
+            for usr in pendentes:
+                st.write(f"👉 **`{usr}`**")
+                col_ap, col_rec = st.columns(2)
+                with col_ap:
+                    if st.button("Aprovar", key=f"aprove_{usr}"):
+                        alterar_status_usuario(usr, "aprovado")
+                        st.success(f"{usr} aprovado!")
+                        st.rerun()
+                with col_rec:
+                    if st.button("Recusar", key=f"reject_{usr}"):
+                        alterar_status_usuario(usr, "excluir")
+                        st.info(f"{usr} recusado.")
+                        st.rerun()
+        else:
+            st.success("Nenhum cadastro pendente!")
+            
+    st.markdown("---")
     if st.button("🚪 Sair da Conta", use_container_width=True):
         st.session_state.autenticado = False
         st.session_state.usuario_logado = ""
@@ -413,7 +468,7 @@ if st.session_state.duvidas_pendentes:
         for idx, cand in enumerate(candidatas):
             cx1, cy1, cx2, cy2 = cand['coords']
             cy1_m, cy2_m = max(0, cy1 - 10), min(h_img, cy2 + 10)
-            cx1_m, cx2_m = max(0, cx1 - 10), min(h_img, cx2 + 10)
+            cx1_m, cx2_m = max(0, cx1 - 10), min(h_img, cy2 + 10)
             crop_opcao = img[cy1_m:cy2_m, cx1_m:cx2_m]
             crop_rgb = cv2.cvtColor(crop_opcao, cv2.COLOR_BGR2RGB)
             
