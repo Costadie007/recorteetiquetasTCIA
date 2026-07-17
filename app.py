@@ -132,11 +132,10 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# --- GERENCIAMENTO E RESET DE USUÁRIOS ---
+# --- GERENCIAMENTO DE USUÁRIOS ---
 ARQUIVO_USUARIOS = "usuarios.json"
 
 def resetar_e_carregar_usuarios():
-    # Reinicia o arquivo JSON com as contas padrão
     dados_padrao = {
         USUARIO_ADMIN: {"senha": "admin123", "status": "aprovado", "role": "admin"},
         "operador": {"senha": "recorte2026", "status": "aprovado", "role": "user"}
@@ -176,12 +175,13 @@ def alterar_status_usuario(usuario, novo_status):
             usuarios[usuario]["status"] = novo_status
         salvar_usuarios_dict(usuarios)
 
-# Força o reset dos usuários na inicialização
-if "usuarios_resetados" not in st.session_state:
-    resetar_e_carregar_usuarios()
-    st.session_state.usuarios_resetados = True
+def alterar_senha_usuario(usuario, nova_senha):
+    usuarios = carregar_usuarios()
+    if usuario in usuarios:
+        usuarios[usuario]["senha"] = nova_senha
+        salvar_usuarios_dict(usuarios)
 
-# --- ESTADO DA SESSÃO ---
+# ESTADO DA SESSÃO
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "usuario_logado" not in st.session_state:
@@ -252,6 +252,24 @@ if not st.session_state.autenticado:
 
 # --- SISTEMA PRINCIPAL ---
 
+# VERIFICA SE O USUÁRIO LOGADO É ADMIN
+usuarios_db = carregar_usuarios()
+dados_logado = usuarios_db.get(st.session_state.usuario_logado, {})
+e_admin = (st.session_state.usuario_logado == USUARIO_ADMIN) or (isinstance(dados_logado, dict) and dados_logado.get("role") == "admin")
+
+# --- BARRA LATERAL ---
+with st.sidebar:
+    if e_admin:
+        st.markdown(f"👤 **Usuário:** `{st.session_state.usuario_logado}` <span class='badge-admin'>👑 ADMIN</span>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"👤 **Usuário:** `{st.session_state.usuario_logado}`")
+        
+    st.markdown("---")
+    if st.button("🚪 Sair da Conta", use_container_width=True):
+        st.session_state.autenticado = False
+        st.session_state.usuario_logado = ""
+        st.rerun()
+
 # --- EXIBIÇÃO DE TEXTO DA LOGO ---
 def renderizar_texto_logo():
     return f"""
@@ -266,49 +284,6 @@ def renderizar_texto_logo():
         ">LOGO</h1>
     </div>
     """
-
-# --- BARRA LATERAL (IDENTIFICAÇÃO DE ADMIN) ---
-with st.sidebar:
-    usuarios_db = carregar_usuarios()
-    dados_logado = usuarios_db.get(st.session_state.usuario_logado, {})
-    e_admin = (st.session_state.usuario_logado == USUARIO_ADMIN) or (isinstance(dados_logado, dict) and dados_logado.get("role") == "admin")
-
-    # Exibição do Usuário e Badge Visual
-    if e_admin:
-        st.markdown(f"👤 **Usuário:** `{st.session_state.usuario_logado}` <span class='badge-admin'>👑 ADMIN</span>", unsafe_allow_html=True)
-    else:
-        st.markdown(f"👤 **Usuário:** `{st.session_state.usuario_logado}`")
-    
-    # Painel exclusivo do Admin
-    if e_admin:
-        st.markdown("---")
-        st.markdown("### 👑 Painel de Aprovação")
-        
-        pendentes = {u: d for u, d in usuarios_db.items() if isinstance(d, dict) and d.get("status") == "pendente"}
-        
-        if pendentes:
-            st.warning(f"**{len(pendentes)}** solicitação(ões) pendente(s):")
-            for usr in pendentes:
-                st.write(f"👉 **`{usr}`**")
-                col_ap, col_rec = st.columns(2)
-                with col_ap:
-                    if st.button("Aprovar", key=f"aprove_{usr}"):
-                        alterar_status_usuario(usr, "aprovado")
-                        st.success(f"{usr} aprovado!")
-                        st.rerun()
-                with col_rec:
-                    if st.button("Recusar", key=f"reject_{usr}"):
-                        alterar_status_usuario(usr, "excluir")
-                        st.info(f"{usr} recusado.")
-                        st.rerun()
-        else:
-            st.success("Nenhum cadastro pendente!")
-            
-    st.markdown("---")
-    if st.button("🚪 Sair da Conta", use_container_width=True):
-        st.session_state.autenticado = False
-        st.session_state.usuario_logado = ""
-        st.rerun()
 
 # --- CABEÇALHO ---
 col_header_logo, col_header_text = st.columns([1.2, 4])
@@ -328,217 +303,310 @@ with col_header_text:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# --- CAMINHO TESSERACT ---
-if platform.system() == "Windows":
-    caminho_tesseract = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-    if os.path.exists(caminho_tesseract):
-        pytesseract.pytesseract.tesseract_cmd = caminho_tesseract
-    else:
-        st.error("⚠️ Tesseract OCR não encontrado em C:\\Program Files\\Tesseract-OCR.")
+# --- NAVEGAÇÃO POR ABAS DO SISTEMA ---
+if e_admin:
+    tab_ferramenta, tab_admin = st.tabs(["✂️ Ferramenta de Recorte", "👑 Painel do Administrador"])
 else:
-    pytesseract.pytesseract.tesseract_cmd = "tesseract"
+    tab_ferramenta, = st.tabs(["✂️ Ferramenta de Recorte"])
+    tab_admin = None
 
-# --- MODELO YOLO ---
-@st.cache_resource
-def carregar_modelo():
-    if not os.path.exists("best.pt"):
-        st.error("⚠️ O arquivo 'best.pt' não foi encontrado.")
+# ==========================================
+# ABA 1: FERRAMENTA DE RECORTE (PRINCIPAL)
+# ==========================================
+with tab_ferramenta:
+    # --- CAMINHO TESSERACT ---
+    if platform.system() == "Windows":
+        caminho_tesseract = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        if os.path.exists(caminho_tesseract):
+            pytesseract.pytesseract.tesseract_cmd = caminho_tesseract
+        else:
+            st.error("⚠️ Tesseract OCR não encontrado em C:\\Program Files\\Tesseract-OCR.")
+    else:
+        pytesseract.pytesseract.tesseract_cmd = "tesseract"
+
+    # --- MODELO YOLO ---
+    @st.cache_resource
+    def carregar_modelo():
+        if not os.path.exists("best.pt"):
+            st.error("⚠️ O arquivo 'best.pt' não foi encontrado.")
+            st.stop()
+        return YOLO("best.pt")
+
+    try:
+        model = carregar_modelo()
+    except Exception as e:
+        st.error(f"Erro ao carregar o modelo YOLO: {e}")
         st.stop()
-    return YOLO("best.pt")
 
-try:
-    model = carregar_modelo()
-except Exception as e:
-    st.error(f"Erro ao carregar o modelo YOLO: {e}")
-    st.stop()
+    TERMOS_CHAVE = ["claro", "embratel", "sgp", "ctrl", "patrimonio", "propriedade"]
 
-TERMOS_CHAVE = ["claro", "embratel", "sgp", "ctrl", "patrimonio", "propriedade"]
-
-# --- FILAS ---
-if "fila_recortes" not in st.session_state:
-    st.session_state.fila_recortes = {}
-if "duvidas_pendentes" not in st.session_state:
-    st.session_state.duvidas_pendentes = {}
-
-# --- UPLOAD DE IMAGENS ---
-col_upload, col_stats = st.columns([2.0, 1.0])
-
-with col_upload:
-    arquivos_enviados = st.file_uploader(
-        "📂 Selecione ou arraste o lote de fotos aqui", 
-        type=["jpg", "jpeg", "png"], 
-        accept_multiple_files=True
-    )
-
-with col_stats:
-    st.markdown("##### 📊 Painel do Lote")
-    tot_enviadas = len(arquivos_enviados) if arquivos_enviados else 0
-    tot_prontas = len(st.session_state.fila_recortes)
-    
-    st.markdown(f"""
-        <div class="metric-card" style="margin-bottom: 10px;">
-            <div class="metric-value">{tot_enviadas}</div>
-            <div class="metric-label">FOTOS CARREGADAS</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value">{tot_prontas}</div>
-            <div class="metric-label">RECORTES PRONTOS</div>
-        </div>
-    """, unsafe_allow_html=True)
-
-# --- PROCESSAMENTO ---
-if arquivos_enviados:
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🚀 INICIAR PROCESSAMENTO DAS FOTOS", use_container_width=True):
+    # --- FILAS ---
+    if "fila_recortes" not in st.session_state:
         st.session_state.fila_recortes = {}
+    if "duvidas_pendentes" not in st.session_state:
         st.session_state.duvidas_pendentes = {}
-        
-        barra_progresso = st.progress(0)
-        status_texto = st.empty()
-        total_fotos = len(arquivos_enviados)
-        
-        for idx, arquivo in enumerate(arquivos_enviados):
-            nome_arquivo = arquivo.name
-            status_texto.write(f"🔍 Analisando imagem ({idx+1}/{total_fotos}): **{nome_arquivo}**")
-            
-            file_bytes = np.asarray(bytearray(arquivo.read()), dtype=np.uint8)
-            img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-            if img is None:
-                continue
-            h_img, w_img, _ = img.shape
-            
-            resultados = model(img, conf=0.35, verbose=False)
-            candidatas = []
-            
-            for r in resultados:
-                for box in r.boxes:
-                    x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
-                    candidatas.append({
-                        'coords': (x1, y1, x2, y2),
-                        'altura': y2 - y1,
-                        'texto_valido': False
-                    })
-            
-            if not candidatas:
-                continue
-                
-            etiqueta_escolhida = None
-            
-            if len(candidatas) == 1:
-                etiqueta_escolhida = candidatas[0]
-            else:
-                for cand in candidatas:
-                    cx1, cy1, cx2, cy2 = cand['coords']
-                    crop_teste = img[max(0, cy1-5):min(h_img, cy2+5), max(0, cx1-5):min(w_img, cx2+5)]
-                    crop_gray = cv2.cvtColor(crop_teste, cv2.COLOR_BGR2GRAY)
-                    
-                    try:
-                        texto_extraido = pytesseract.image_to_string(crop_gray, config='--psm 11').lower()
-                        if any(termo in texto_extraido for termo in TERMOS_CHAVE):
-                            cand['texto_valido'] = True
-                    except Exception:
-                        pass
-                
-                validadas = [c for c in candidatas if c['texto_valido']]
-                
-                if len(validadas) == 1:
-                    etiqueta_escolhida = validadas[0]
-                else:
-                    st.session_state.duvidas_pendentes[nome_arquivo] = {
-                        "imagem": img,
-                        "candidatas": candidatas
-                    }
-            
-            if etiqueta_escolhida is not None:
-                x1, y1, x2, y2 = etiqueta_escolhida['coords']
-                y1, y2 = max(0, y1 - 10), min(h_img, y2 + 10)
-                x1, x2 = max(0, x1 - 10), min(w_img, x2 + 10)
-                recorte = img[y1:y2, x1:x2]
-                _, buffer = cv2.imencode('.png', recorte)
-                st.session_state.fila_recortes[nome_arquivo] = buffer.tobytes()
-                
-            barra_progresso.progress((idx + 1) / total_fotos)
-            
-        status_texto.success(f"🎉 Processamento concluído com sucesso!")
-        st.rerun()
 
-# --- DÚVIDAS MANUAIS ---
-if st.session_state.duvidas_pendentes:
-    st.markdown("---")
-    st.markdown("### ⚠️ Decisões Manuais Necessárias")
-    st.write("A IA encontrou múltiplas etiquetas em algumas fotos. Clique na opção correta:")
-    
-    fotos_com_duvida = list(st.session_state.duvidas_pendentes.keys())
-    
-    for nome_foto in fotos_com_duvida:
-        dados = st.session_state.duvidas_pendentes[nome_foto]
-        img = dados["imagem"]
-        h_img, w_img, _ = img.shape
-        candidatas = dados["candidatas"]
+    # --- UPLOAD DE IMAGENS ---
+    col_upload, col_stats = st.columns([2.0, 1.0])
+
+    with col_upload:
+        arquivos_enviados = st.file_uploader(
+            "📂 Selecione ou arraste o lote de fotos aqui", 
+            type=["jpg", "jpeg", "png"], 
+            accept_multiple_files=True
+        )
+
+    with col_stats:
+        st.markdown("##### 📊 Painel do Lote")
+        tot_enviadas = len(arquivos_enviados) if arquivos_enviados else 0
+        tot_prontas = len(st.session_state.fila_recortes)
         
-        st.markdown(f"**Foto:** `{nome_foto}`")
-        colunas = st.columns(len(candidatas))
-        
-        for idx, cand in enumerate(candidatas):
-            cx1, cy1, cx2, cy2 = cand['coords']
-            cy1_m, cy2_m = max(0, cy1 - 10), min(h_img, cy2 + 10)
-            cx1_m, cx2_m = max(0, cx1 - 10), min(h_img, cx2 + 10)
-            crop_opcao = img[cy1_m:cy2_m, cx1_m:cx2_m]
-            crop_rgb = cv2.cvtColor(crop_opcao, cv2.COLOR_BGR2RGB)
+        st.markdown(f"""
+            <div class="metric-card" style="margin-bottom: 10px;">
+                <div class="metric-value">{tot_enviadas}</div>
+                <div class="metric-label">FOTOS CARREGADAS</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{tot_prontas}</div>
+                <div class="metric-label">RECORTES PRONTOS</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    # --- PROCESSAMENTO ---
+    if arquivos_enviados:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🚀 INICIAR PROCESSAMENTO DAS FOTOS", use_container_width=True):
+            st.session_state.fila_recortes = {}
+            st.session_state.duvidas_pendentes = {}
             
-            with colunas[idx]:
-                st.image(crop_rgb, caption=f"Opção {idx + 1}", use_container_width=True)
-                if st.button(f"✓ Selecionar {idx + 1}", key=f"btn_{nome_foto}_{idx}"):
-                    x1, y1, x2, y2 = cand['coords']
+            barra_progresso = st.progress(0)
+            status_texto = st.empty()
+            total_fotos = len(arquivos_enviados)
+            
+            for idx, arquivo in enumerate(arquivos_enviados):
+                nome_arquivo = arquivo.name
+                status_texto.write(f"🔍 Analisando imagem ({idx+1}/{total_fotos}): **{nome_arquivo}**")
+                
+                file_bytes = np.asarray(bytearray(arquivo.read()), dtype=np.uint8)
+                img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+                if img is None:
+                    continue
+                h_img, w_img, _ = img.shape
+                
+                resultados = model(img, conf=0.35, verbose=False)
+                candidatas = []
+                
+                for r in resultados:
+                    for box in r.boxes:
+                        x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
+                        candidatas.append({
+                            'coords': (x1, y1, x2, y2),
+                            'altura': y2 - y1,
+                            'texto_valido': False
+                        })
+                
+                if not candidatas:
+                    continue
+                    
+                etiqueta_escolhida = None
+                
+                if len(candidatas) == 1:
+                    etiqueta_escolhida = candidatas[0]
+                else:
+                    for cand in candidatas:
+                        cx1, cy1, cx2, cy2 = cand['coords']
+                        crop_teste = img[max(0, cy1-5):min(h_img, cy2+5), max(0, cx1-5):min(w_img, cx2+5)]
+                        crop_gray = cv2.cvtColor(crop_teste, cv2.COLOR_BGR2GRAY)
+                        
+                        try:
+                            texto_extraido = pytesseract.image_to_string(crop_gray, config='--psm 11').lower()
+                            if any(termo in texto_extraido for termo in TERMOS_CHAVE):
+                                cand['texto_valido'] = True
+                        except Exception:
+                            pass
+                    
+                    validadas = [c for c in candidatas if c['texto_valido']]
+                    
+                    if len(validadas) == 1:
+                        etiqueta_escolhida = validadas[0]
+                    else:
+                        st.session_state.duvidas_pendentes[nome_arquivo] = {
+                            "imagem": img,
+                            "candidatas": candidatas
+                        }
+                
+                if etiqueta_escolhida is not None:
+                    x1, y1, x2, y2 = etiqueta_escolhida['coords']
                     y1, y2 = max(0, y1 - 10), min(h_img, y2 + 10)
                     x1, x2 = max(0, x1 - 10), min(w_img, x2 + 10)
                     recorte = img[y1:y2, x1:x2]
                     _, buffer = cv2.imencode('.png', recorte)
+                    st.session_state.fila_recortes[nome_arquivo] = buffer.tobytes()
                     
-                    st.session_state.fila_recortes[nome_foto] = buffer.tobytes()
-                    del st.session_state.duvidas_pendentes[nome_foto]
-                    st.rerun()
+                barra_progresso.progress((idx + 1) / total_fotos)
+                
+            status_texto.success(f"🎉 Processamento concluído com sucesso!")
+            st.rerun()
 
-# --- GALERIA E DOWNLOADS ---
-if st.session_state.fila_recortes:
-    st.markdown("---")
-    col_titulo, col_dl_zip = st.columns([2.5, 1.5])
-    with col_titulo:
-        st.markdown(f"### 📥 Recortes Prontos ({len(st.session_state.fila_recortes)})")
-    
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-        for nome_foto, bytes_img in st.session_state.fila_recortes.items():
-            zip_file.writestr(f"recorte_{nome_foto}", bytes_img)
+    # --- DÚVIDAS MANUAIS ---
+    if st.session_state.duvidas_pendentes:
+        st.markdown("---")
+        st.markdown("### ⚠️ Decisões Manuais Necessárias")
+        st.write("A IA encontrou múltiplas etiquetas em algumas fotos. Clique na opção correta:")
+        
+        fotos_com_duvida = list(st.session_state.duvidas_pendentes.keys())
+        
+        for nome_foto in fotos_com_duvida:
+            dados = st.session_state.duvidas_pendentes[nome_foto]
+            img = dados["imagem"]
+            h_img, w_img, _ = img.shape
+            candidatas = dados["candidatas"]
             
-    with col_dl_zip:
-        st.download_button(
-            label="📦 BAIXAR TODOS EM .ZIP",
-            data=zip_buffer.getvalue(),
-            file_name="recortes_etiquetas.zip",
-            mime="application/zip",
-            use_container_width=True
-        )
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    recortes_prontos = st.session_state.fila_recortes
-    colunas_galeria = st.columns(4)
-    
-    for idx, (nome, bytes_img) in enumerate(recortes_prontos.items()):
-        col_idx = idx % 4
-        with colunas_galeria[col_idx]:
-            st.markdown('<div class="img-card">', unsafe_allow_html=True)
-            st.image(bytes_img, caption=nome, use_container_width=True)
+            st.markdown(f"**Foto:** `{nome_foto}`")
+            colunas = st.columns(len(candidatas))
+            
+            for idx, cand in enumerate(candidatas):
+                cx1, cy1, cx2, cy2 = cand['coords']
+                cy1_m, cy2_m = max(0, cy1 - 10), min(h_img, cy2 + 10)
+                cx1_m, cx2_m = max(0, cx1 - 10), min(h_img, cx2 + 10)
+                crop_opcao = img[cy1_m:cy2_m, cx1_m:cx2_m]
+                crop_rgb = cv2.cvtColor(crop_opcao, cv2.COLOR_BGR2RGB)
+                
+                with colunas[idx]:
+                    st.image(crop_rgb, caption=f"Opção {idx + 1}", use_container_width=True)
+                    if st.button(f"✓ Selecionar {idx + 1}", key=f"btn_{nome_foto}_{idx}"):
+                        x1, y1, x2, y2 = cand['coords']
+                        y1, y2 = max(0, y1 - 10), min(h_img, y2 + 10)
+                        x1, x2 = max(0, x1 - 10), min(w_img, x2 + 10)
+                        recorte = img[y1:y2, x1:x2]
+                        _, buffer = cv2.imencode('.png', recorte)
+                        
+                        st.session_state.fila_recortes[nome_foto] = buffer.tobytes()
+                        del st.session_state.duvidas_pendentes[nome_foto]
+                        st.rerun()
+
+    # --- GALERIA E DOWNLOADS ---
+    if st.session_state.fila_recortes:
+        st.markdown("---")
+        col_titulo, col_dl_zip = st.columns([2.5, 1.5])
+        with col_titulo:
+            st.markdown(f"### 📥 Recortes Prontos ({len(st.session_state.fila_recortes)})")
+        
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+            for nome_foto, bytes_img in st.session_state.fila_recortes.items():
+                zip_file.writestr(f"recorte_{nome_foto}", bytes_img)
+                
+        with col_dl_zip:
             st.download_button(
-                label="📥 Baixar PNG",
-                data=bytes_img,
-                file_name=f"recorte_{nome}",
-                mime="image/png",
-                key=f"dl_{nome}",
+                label="📦 BAIXAR TODOS EM .ZIP",
+                data=zip_buffer.getvalue(),
+                file_name="recortes_etiquetas.zip",
+                mime="application/zip",
                 use_container_width=True
             )
-            st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        recortes_prontos = st.session_state.fila_recortes
+        colunas_galeria = st.columns(4)
+        
+        for idx, (nome, bytes_img) in enumerate(recortes_prontos.items()):
+            col_idx = idx % 4
+            with colunas_galeria[col_idx]:
+                st.markdown('<div class="img-card">', unsafe_allow_html=True)
+                st.image(bytes_img, caption=nome, use_container_width=True)
+                st.download_button(
+                    label="📥 Baixar PNG",
+                    data=bytes_img,
+                    file_name=f"recorte_{nome}",
+                    mime="image/png",
+                    key=f"dl_{nome}",
+                    use_container_width=True
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
+
+# ==========================================
+# ABA 2: EXCLUSIVA DE ADMIN
+# ==========================================
+if e_admin and tab_admin:
+    with tab_admin:
+        st.markdown("## 👑 Painel de Controle de Usuários")
+        st.write("Gerencie solicitações de acesso e contas cadastradas na plataforma.")
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        todos_usuarios = carregar_usuarios()
+        
+        # SUB-SEÇÃO 1: SOLICITAÇÕES PENDENTES
+        pendentes = {u: d for u, d in todos_usuarios.items() if isinstance(d, dict) and d.get("status") == "pendente"}
+        
+        st.markdown("### ⏳ Solicitações Pendentes")
+        if pendentes:
+            for usr, dados in pendentes.items():
+                col_u, col_a, col_r = st.columns([3, 1, 1])
+                with col_u:
+                    st.markdown(f"👤 **`{usr}`** aguardando liberação.")
+                with col_a:
+                    if st.button("✅ Aprovar", key=f"tab_aprove_{usr}"):
+                        alterar_status_usuario(usr, "aprovado")
+                        st.success(f"{usr} foi aprovado!")
+                        st.rerun()
+                with col_r:
+                    if st.button("❌ Recusar", key=f"tab_reject_{usr}"):
+                        alterar_status_usuario(usr, "excluir")
+                        st.info(f"{usr} foi recusado.")
+                        st.rerun()
+                st.markdown("<hr style='margin: 5px 0;'>", unsafe_allow_html=True)
+        else:
+            st.info("Nenhuma conta aguardando aprovação no momento.")
+            
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        
+        # SUB-SEÇÃO 2: LISTA COMPLETA DE USUÁRIOS
+        st.markdown("### 👥 Todos os Usuários Cadastrados")
+        
+        col_header1, col_header2, col_header3, col_header4 = st.columns([2, 1.5, 1.5, 2])
+        col_header1.markdown("**Usuário**")
+        col_header2.markdown("**Nível**")
+        col_header3.markdown("**Status**")
+        col_header4.markdown("**Ações**")
+        st.markdown("---")
+
+        for usr, dados in todos_usuarios.items():
+            if isinstance(dados, dict):
+                role = dados.get("role", "user")
+                status = dados.get("status", "aprovado")
+            else:
+                role = "user"
+                status = "aprovado"
+
+            col_usr, col_role, col_stat, col_act = st.columns([2, 1.5, 1.5, 2])
+            
+            with col_usr:
+                st.write(f"**`{usr}`**")
+                
+            with col_role:
+                if role == "admin":
+                    st.markdown("👑 **Admin**")
+                else:
+                    st.write("👤 Usuário")
+                    
+            with col_stat:
+                if status == "aprovado":
+                    st.markdown("🟢 <span style='color:#00FF00;'>Aprovado</span>", unsafe_allow_html=True)
+                else:
+                    st.markdown("🟡 <span style='color:#FFFF00;'>Pendente</span>", unsafe_allow_html=True)
+                    
+            with col_act:
+                if usr != USUARIO_ADMIN:  # Proteção para não excluir o admin principal
+                    if st.button("🗑️ Excluir Conta", key=f"del_user_{usr}"):
+                        alterar_status_usuario(usr, "excluir")
+                        st.success(f"Conta `{usr}` removida!")
+                        st.rerun()
+                else:
+                    st.write("*(Conta Protegida)*")
+            
+            st.markdown("<hr style='margin: 3px 0; border-color: #333;'>", unsafe_allow_html=True)
 
 # --- RODAPÉ ---
 st.markdown("<br><br>", unsafe_allow_html=True)
