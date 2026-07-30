@@ -2,7 +2,11 @@ import io
 import json
 import os
 import platform
+import smtplib
 import zipfile
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
 import cv2
 import numpy as np
 import pytesseract
@@ -125,13 +129,68 @@ st.markdown(
         border-radius: 12px;
         margin-left: 5px;
     }}
+    .admin-box {{
+        background-color: {COR_FUNDO_CARD};
+        border: 1px solid {COR_LARANJA};
+        border-radius: 10px;
+        padding: 18px;
+        margin-bottom: 20px;
+    }}
     </style>
 """,
     unsafe_allow_html=True,
 )
 
-# --- GERENCIAMENTO DE USUÁRIOS ---
+# --- GERENCIAMENTO DE USUÁRIOS E CONFIGURAÇÕES ---
 ARQUIVO_USUARIOS = "usuarios.json"
+ARQUIVO_CONFIG = "config_smtp.json"
+
+
+def carregar_config_smtp():
+    if os.path.exists(ARQUIVO_CONFIG):
+        try:
+            with open(ARQUIVO_CONFIG, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "servidor": "smtp.gmail.com",
+        "porta": 587,
+        "email_remetente": "",
+        "senha_app": "",
+    }
+
+
+def salvar_config_smtp(config):
+    with open(ARQUIVO_CONFIG, "w") as f:
+        json.dump(config, f, indent=4)
+
+
+def enviar_notificacao_email(assunto, mensagem_html, email_destino):
+    cfg = carregar_config_smtp()
+    remetente = cfg.get("email_remetente")
+    senha = cfg.get("senha_app")
+
+    if not remetente or not senha:
+        return False, "Configuração de SMTP ausente."
+
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = remetente
+        msg["To"] = email_destino
+        msg["Subject"] = assunto
+        msg.attach(MIMEText(mensagem_html, "html"))
+
+        server = smtplib.SMTP(
+            cfg.get("servidor", "smtp.gmail.com"), int(cfg.get("porta", 587))
+        )
+        server.starttls()
+        server.login(remetente, senha)
+        server.sendmail(remetente, email_destino, msg.as_string())
+        server.quit()
+        return True, "E-mail enviado com sucesso!"
+    except Exception as e:
+        return False, str(e)
 
 
 def resetar_e_carregar_usuarios():
@@ -171,13 +230,34 @@ def salvar_usuarios_dict(usuarios):
 
 def solicitar_novo_cadastro(usuario, email, senha):
     usuarios = carregar_usuarios()
-    usuarios[usuario.strip().lower()] = {
+    usuario_key = usuario.strip().lower()
+    email_limpo = email.strip().lower()
+
+    usuarios[usuario_key] = {
         "senha": senha,
-        "email": email.strip().lower(),
+        "email": email_limpo,
         "status": "pendente",
         "role": "user",
     }
     salvar_usuarios_dict(usuarios)
+
+    # Disparo de notificação por e-mail para o Administrador
+    email_admin = usuarios.get(USUARIO_ADMIN, {}).get("email", "")
+    if email_admin:
+        corpo = f"""
+        <h3>✂️ Nova Solicitação de Cadastro</h3>
+        <p>Um novo usuário solicitou acesso ao sistema:</p>
+        <ul>
+            <li><b>Usuário:</b> {usuario_key}</li>
+            <li><b>E-mail:</b> {email_limpo}</li>
+        </ul>
+        <p>Acesse o <b>Painel do Administrador</b> para aprovar ou recusar este cadastro.</p>
+        """
+        enviar_notificacao_email(
+            f"[Sistema Recorte] Novo Cadastro Pendente: {usuario_key}",
+            corpo,
+            email_admin,
+        )
 
 
 def alterar_status_usuario(usuario, novo_status):
@@ -334,7 +414,7 @@ if not st.session_state.autenticado:
                     else:
                         solicitar_novo_cadastro(novo_usuario, novo_email, nova_senha)
                         st.success(
-                            "✅ Solicitação enviada! Aguarde a aprovação do administrador."
+                            "✅ Solicitação enviada! Se o e-mail do admin estiver configurado, ele será notificado."
                         )
 
     st.stop()
@@ -655,14 +735,57 @@ if e_admin and tab_admin:
     with tab_admin:
         st.markdown("## 👑 Painel de Controle do Administrador")
         st.write(
-            "Gerencie solicitações de acesso, atualize e-mails de contato e controle as contas do sistema."
+            "Gerencie solicitações de acesso, configure o envio de e-mails e controle as contas do sistema."
         )
         st.markdown("<br>", unsafe_allow_html=True)
 
         todos_usuarios = carregar_usuarios()
 
-        # SUB-SEÇÃO DE ALTERAÇÃO DE E-MAIL DO ADMIN / USUÁRIOS
-        st.markdown("### 📧 Alterar E-mail de Usuário / Notificação")
+        # BLOCAGEM DESTACADA: CONFIGURAÇÃO DE E-MAIL
+        st.markdown("### ⚙️ Configuração do Servidor de E-mail (SMTP)")
+        cfg_smtp = carregar_config_smtp()
+
+        with st.form("form_smtp_config"):
+            c_serv, c_port = st.columns([3, 1])
+            with c_serv:
+                servidor_input = st.text_input(
+                    "Servidor SMTP",
+                    value=cfg_smtp.get("servidor", "smtp.gmail.com"),
+                )
+            with c_port:
+                porta_input = st.number_input(
+                    "Porta", value=int(cfg_smtp.get("porta", 587))
+                )
+
+            c_rem, c_sen = st.columns([1, 1])
+            with c_rem:
+                remetente_input = st.text_input(
+                    "E-mail Remetente (E-mail do Sistema)",
+                    value=cfg_smtp.get("email_remetente", ""),
+                )
+            with c_sen:
+                senha_input = st.text_input(
+                    "Senha / Senha de App",
+                    value=cfg_smtp.get("senha_app", ""),
+                    type="password",
+                )
+
+            btn_salvar_smtp = st.form_submit_button("💾 Salvar Configuração de E-mail")
+
+            if btn_salvar_smtp:
+                nova_cfg = {
+                    "servidor": servidor_input.strip(),
+                    "porta": int(porta_input),
+                    "email_remetente": remetente_input.strip(),
+                    "senha_app": senha_input.strip(),
+                }
+                salvar_config_smtp(nova_cfg)
+                st.success("✅ Configurações de e-mail salvas com sucesso!")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ALTERAÇÃO DE E-MAIL DO ADMIN / USUÁRIOS
+        st.markdown("### 📧 Alterar E-mail de Notificação do Admin / Usuários")
         with st.form("form_alterar_email"):
             col_sel, col_em = st.columns([1, 2])
             with col_sel:
@@ -684,16 +807,23 @@ if e_admin and tab_admin:
             btn_salvar_email = st.form_submit_button("💾 Salvar Novo E-mail")
 
             if btn_salvar_email:
-                if not novo_email_input or "@" not in novo_email_input or "." not in novo_email_input:
+                if (
+                    not novo_email_input
+                    or "@" not in novo_email_input
+                    or "." not in novo_email_input
+                ):
                     st.error("Por favor, digite um e-mail válido.")
                 else:
                     alterar_email_usuario(usuario_para_editar, novo_email_input)
-                    st.success(f"✅ E-mail do usuário `{usuario_para_editar}` atualizado para `{novo_email_input}` com sucesso!")
+                    st.success(
+                        f"✅ E-mail do usuário `{usuario_para_editar}` atualizado para"
+                        f" `{novo_email_input}` com sucesso!"
+                    )
                     st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # SUB-SEÇÃO 1: SOLICITAÇÕES PENDENTES
+        # SOLICITAÇÕES PENDENTES
         pendentes = {
             u: d
             for u, d in todos_usuarios.items()
@@ -727,7 +857,7 @@ if e_admin and tab_admin:
 
         st.markdown("<br><br>", unsafe_allow_html=True)
 
-        # SUB-SEÇÃO 2: LISTA COMPLETA DE USUÁRIOS
+        # LISTA COMPLETA DE USUÁRIOS
         st.markdown("### 👥 Todos os Usuários Cadastrados")
 
         col_header1, col_header2, col_header3, col_header4, col_header5 = (
