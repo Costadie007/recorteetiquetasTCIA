@@ -129,13 +129,6 @@ st.markdown(
         border-radius: 12px;
         margin-left: 5px;
     }}
-    .admin-box {{
-        background-color: {COR_FUNDO_CARD};
-        border: 1px solid {COR_LARANJA};
-        border-radius: 10px;
-        padding: 18px;
-        margin-bottom: 20px;
-    }}
     </style>
 """,
     unsafe_allow_html=True,
@@ -172,7 +165,7 @@ def enviar_notificacao_email(assunto, mensagem_html, email_destino):
     senha = cfg.get("senha_app")
 
     if not remetente or not senha:
-        return False, "Configuração de SMTP ausente."
+        return False, "Configuração de SMTP ausente (Remetente ou Senha)."
 
     try:
         msg = MIMEMultipart()
@@ -184,20 +177,26 @@ def enviar_notificacao_email(assunto, mensagem_html, email_destino):
         server = smtplib.SMTP(
             cfg.get("servidor", "smtp.gmail.com"), int(cfg.get("porta", 587))
         )
+        server.ehlo()
         server.starttls()
         server.login(remetente, senha)
         server.sendmail(remetente, email_destino, msg.as_string())
         server.quit()
         return True, "E-mail enviado com sucesso!"
+    except smtplib.SMTPAuthenticationError:
+        return False, (
+            "Erro de Autenticação: Verifique se usou a 'Senha de App' de 16"
+            " dígitos do Gmail."
+        )
     except Exception as e:
-        return False, str(e)
+        return False, f"Erro ao enviar e-mail: {str(e)}"
 
 
 def resetar_e_carregar_usuarios():
     dados_padrao = {
         USUARIO_ADMIN: {
             "senha": "admin123",
-            "email": "diego@admin.com",
+            "email": "diego2007costa@gmail.com",
             "status": "aprovado",
             "role": "admin",
         },
@@ -241,7 +240,7 @@ def solicitar_novo_cadastro(usuario, email, senha):
     }
     salvar_usuarios_dict(usuarios)
 
-    # Disparo de notificação por e-mail para o Administrador
+    # Notifica o Administrador sobre o cadastro pendente
     email_admin = usuarios.get(USUARIO_ADMIN, {}).get("email", "")
     if email_admin:
         corpo = f"""
@@ -263,11 +262,28 @@ def solicitar_novo_cadastro(usuario, email, senha):
 def alterar_status_usuario(usuario, novo_status):
     usuarios = carregar_usuarios()
     if usuario in usuarios:
+        email_destino = (
+            usuarios[usuario].get("email")
+            if isinstance(usuarios[usuario], dict)
+            else None
+        )
+
         if novo_status == "excluir":
             del usuarios[usuario]
         else:
             usuarios[usuario]["status"] = novo_status
+
         salvar_usuarios_dict(usuarios)
+
+        # Dispara e-mail informando o Usuário sobre a Aprovação
+        if novo_status == "aprovado" and email_destino:
+            assunto = "🎉 Seu acesso ao Sistema de Recorte foi Aprovado!"
+            corpo = f"""
+            <h3>Olá, {usuario}!</h3>
+            <p>Sua conta foi <b>aprovada pelo administrador</b>.</p>
+            <p>Você já pode realizar login na plataforma e enviar suas fotos para recorte de etiquetas.</p>
+            """
+            enviar_notificacao_email(assunto, corpo, email_destino)
 
 
 def alterar_senha_usuario(usuario, nova_senha):
@@ -414,7 +430,7 @@ if not st.session_state.autenticado:
                     else:
                         solicitar_novo_cadastro(novo_usuario, novo_email, nova_senha)
                         st.success(
-                            "✅ Solicitação enviada! Se o e-mail do admin estiver configurado, ele será notificado."
+                            "✅ Solicitação enviada! O administrador foi notificado."
                         )
 
     st.stop()
@@ -638,7 +654,24 @@ with tab_ferramenta:
 
                 barra_progresso.progress((idx + 1) / total_fotos)
 
-            status_texto.success("🎉 Processamento concluído com sucesso!")
+            # --- NOTIFICAÇÃO POR E-MAIL AO USUÁRIO ---
+            usr_atual = st.session_state.usuario_logado
+            email_usr_atual = usuarios_db.get(usr_atual, {}).get("email")
+
+            if email_usr_atual:
+                assunto_lote = "📦 Seus recortes de etiquetas estão prontos!"
+                corpo_lote = f"""
+                <h3>Olá, {usr_atual}!</h3>
+                <p>O processamento do seu lote de fotos foi concluído com sucesso.</p>
+                <ul>
+                    <li><b>Total de fotos enviadas:</b> {total_fotos}</li>
+                    <li><b>Recortes gerados:</b> {len(st.session_state.fila_recortes)}</li>
+                </ul>
+                <p>Acesse o sistema para realizar o download dos arquivos em PNG ou em pacote .ZIP.</p>
+                """
+                enviar_notificacao_email(assunto_lote, corpo_lote, email_usr_atual)
+
+            status_texto.success("🎉 Processamento concluído com sucesso e e-mail enviado ao usuário!")
             st.rerun()
 
     if st.session_state.duvidas_pendentes:
@@ -741,7 +774,7 @@ if e_admin and tab_admin:
 
         todos_usuarios = carregar_usuarios()
 
-        # BLOCAGEM DESTACADA: CONFIGURAÇÃO DE E-MAIL
+        # CONFIGURAÇÃO DE E-MAIL
         st.markdown("### ⚙️ Configuração do Servidor de E-mail (SMTP)")
         cfg_smtp = carregar_config_smtp()
 
@@ -781,6 +814,18 @@ if e_admin and tab_admin:
                 }
                 salvar_config_smtp(nova_cfg)
                 st.success("✅ Configurações de e-mail salvas com sucesso!")
+
+        # BOTÃO DE TESTE DE EMAIL
+        if st.button("🧪 Testar Disparo de E-mail para mim"):
+            ok, msg = enviar_notificacao_email(
+                "Teste de Conexão SMTP",
+                "<p>Este é um e-mail de teste do <b>Sistema de Recorte de Etiquetas</b>!</p>",
+                cfg_smtp.get("email_remetente", ""),
+            )
+            if ok:
+                st.success(msg)
+            else:
+                st.error(msg)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -842,12 +887,12 @@ if e_admin and tab_admin:
                 with col_a:
                     if st.button("✅ Aprovar", key=f"tab_aprove_{usr}"):
                         alterar_status_usuario(usr, "aprovado")
-                        st.success(f"{usr} foi aprovado!")
+                        st.success(f"Conta '{usr}' aprovada e e-mail enviado!")
                         st.rerun()
                 with col_r:
                     if st.button("❌ Recusar", key=f"tab_reject_{usr}"):
                         alterar_status_usuario(usr, "excluir")
-                        st.info(f"{usr} foi recusado.")
+                        st.info(f"Conta '{usr}' recusada.")
                         st.rerun()
                 st.markdown(
                     "<hr style='margin: 5px 0;'>", unsafe_allow_html=True
