@@ -1,8 +1,9 @@
-import io
+import gc
 import json
 import os
 import platform
 import smtplib
+import tempfile
 import zipfile
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -27,91 +28,37 @@ st.set_page_config(
     page_title="Recorte de Etiquetas", page_icon="✂️", layout="wide"
 )
 
-# --- ESTILIZAÇÃO CSS & SCRIPT DE REMOÇÃO FORÇADA ---
+# --- ESTILIZAÇÃO CSS ---
 st.markdown(
     f"""
     <style>
-    /* 1. Oculta barra superior, header, menu e toolbar */
-    [data-testid="stToolbar"], 
-    [data-testid="stHeader"], 
-    header, 
-    #MainMenu,
-    .stApp > header {{
+    [data-testid="stToolbar"], [data-testid="stHeader"], header, #MainMenu, .stApp > header {{
         display: none !important;
         visibility: hidden !important;
         height: 0px !important;
     }}
-    
-    /* 2. Oculta o rodapé padrão */
-    footer {{
+    footer {{ display: none !important; }}
+    [data-testid="stStatusWidget"], [data-testid="stConnectionStatus"], .viewerBadge_container__1QSob {{
         display: none !important;
     }}
-
-    /* 3. Oculta o Viewer Badge, botão da Streamlit Cloud e status de conexão */
-    [data-testid="stStatusWidget"],
-    [data-testid="stConnectionStatus"],
-    .viewerBadge_container__1QSob,
-    .viewerBadge_link__1S137,
-    #ConnectionStatus,
-    div[class*="viewerBadge"],
-    div[class*="stStatusWidget"],
-    div[data-testid="stDecoration"],
-    iframe[title="streamlitApp"] ~ div,
-    a[href*="streamlit.io"] {{
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-    }}
-
-    /* Estilização Geral do App */
-    .stApp {{
-        background-color: {COR_GRAFITE};
-        color: {COR_TEXTO};
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    }}
-    div.block-container {{
-        padding-top: 1rem !important;
-        padding-bottom: 2rem;
-        max-width: 92%;
-    }}
-    h1, h2, h3, h4, h5, h6, p, span, label {{
-        color: {COR_TEXTO} !important;
-    }}
+    .stApp {{ background-color: {COR_GRAFITE}; color: {COR_TEXTO}; font-family: 'Inter', sans-serif; }}
+    div.block-container {{ padding-top: 1rem !important; padding-bottom: 2rem; max-width: 92%; }}
+    h1, h2, h3, h4, h5, h6, p, span, label {{ color: {COR_TEXTO} !important; }}
     .metric-card {{
         background-color: {COR_FUNDO_CARD};
         border: 1px solid #444340;
         border-radius: 10px;
         padding: 12px 8px;
         text-align: center;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
     }}
-    .metric-value {{
-        font-size: 26px;
-        font-weight: bold;
-        color: {COR_LARANJA} !important;
-        line-height: 1.1;
-        margin-bottom: 4px;
-    }}
-    .metric-label {{
-        font-size: 11px;
-        color: #aaaaaa !important;
-        letter-spacing: 0.5px;
-    }}
+    .metric-value {{ font-size: 26px; font-weight: bold; color: {COR_LARANJA} !important; }}
+    .metric-label {{ font-size: 11px; color: #aaaaaa !important; }}
     .stButton>button {{
         background: linear-gradient(90deg, {COR_LARANJA} 0%, #d88100 100%) !important;
         color: #FFFFFF !important;
         border-radius: 8px !important;
         font-weight: bold !important;
-        font-size: 16px !important;
         border: none !important;
-        padding: 0.6rem 1.2rem !important;
-        box-shadow: 0 4px 15px rgba(243, 146, 0, 0.3) !important;
-        transition: all 0.3s ease !important;
-    }}
-    .stButton>button:hover {{
-        transform: translateY(-2px) !important;
-        box-shadow: 0 6px 20px rgba(243, 146, 0, 0.5) !important;
     }}
     .stDownloadButton>button {{
         background-color: {COR_LARANJA} !important;
@@ -119,45 +66,9 @@ st.markdown(
         border-radius: 8px !important;
         font-weight: bold !important;
         border: none !important;
-        box-shadow: 0 4px 12px rgba(243, 146, 0, 0.3) !important;
         width: 100% !important;
-        padding: 0.75rem !important;
-    }}
-    [data-testid="stFileUploadDropzone"] {{
-        background-color: {COR_FUNDO_CARD} !important;
-        border: 2px dashed {COR_LARANJA} !important;
-        border-radius: 12px !important;
-        padding: 25px !important;
-    }}
-    .stProgress > div > div > div > div {{
-        background-color: {COR_LARANJA} !important;
-    }}
-    .img-card {{
-        background-color: {COR_FUNDO_CARD};
-        border-radius: 10px;
-        padding: 10px;
-        border: 1px solid #444340;
-        margin-bottom: 15px;
-    }}
-    .badge-admin {{
-        background-color: {COR_LARANJA};
-        color: #000000;
-        font-size: 11px;
-        font-weight: bold;
-        padding: 3px 8px;
-        border-radius: 12px;
-        margin-left: 5px;
     }}
     </style>
-
-    <script>
-    /* Remove elementos remanescentes no iframe pai injetados pela Streamlit Cloud */
-    const removerElementos = () => {{
-        const elementos = parent.document.querySelectorAll('[data-testid="stStatusWidget"], .viewerBadge_container__1QSob, a[href*="streamlit.io"]');
-        elementos.forEach(el => el.remove());
-    }};
-    setInterval(removerElementos, 1000);
-    </script>
 """,
     unsafe_allow_html=True,
 )
@@ -183,18 +94,13 @@ def carregar_config_smtp():
     }
 
 
-def salvar_config_smtp(config):
-    with open(ARQUIVO_CONFIG, "w") as f:
-        json.dump(config, f, indent=4)
-
-
 def enviar_notificacao_email(assunto, mensagem_html, email_destino):
     cfg = carregar_config_smtp()
     remetente = cfg.get("email_remetente")
     senha = cfg.get("senha_app")
 
     if not remetente or not senha:
-        return False, "Configuração de SMTP ausente (Remetente ou Senha)."
+        return False, "Configuração de SMTP ausente."
 
     try:
         msg = MIMEMultipart()
@@ -211,170 +117,29 @@ def enviar_notificacao_email(assunto, mensagem_html, email_destino):
         server.login(remetente, senha)
         server.sendmail(remetente, email_destino, msg.as_string())
         server.quit()
-        return True, "E-mail enviado com sucesso!"
-    except smtplib.SMTPAuthenticationError:
-        return False, (
-            "Erro de Autenticação: Verifique se usou a 'Senha de App' de 16"
-            " dígitos do Gmail."
-        )
+        return True, "E-mail enviado!"
     except Exception as e:
-        return False, f"Erro ao enviar e-mail: {str(e)}"
-
-
-def resetar_e_carregar_usuarios():
-    dados_padrao = {
-        USUARIO_ADMIN: {
-            "senha": "admin123",
-            "email": "diego2007costa@gmail.com",
-            "status": "aprovado",
-            "role": "admin",
-        },
-        "operador": {
-            "senha": "recorte2026",
-            "email": "operador@empresa.com",
-            "status": "aprovado",
-            "role": "user",
-        },
-    }
-    with open(ARQUIVO_USUARIOS, "w") as f:
-        json.dump(dados_padrao, f, indent=4)
-    return dados_padrao
+        return False, str(e)
 
 
 def carregar_usuarios():
     if not os.path.exists(ARQUIVO_USUARIOS):
-        return resetar_e_carregar_usuarios()
+        dados_padrao = {
+            USUARIO_ADMIN: {
+                "senha": "admin123",
+                "email": "admin@empresa.com",
+                "status": "aprovado",
+                "role": "admin",
+            }
+        }
+        with open(ARQUIVO_USUARIOS, "w") as f:
+            json.dump(dados_padrao, f, indent=4)
+        return dados_padrao
     try:
         with open(ARQUIVO_USUARIOS, "r") as f:
             return json.load(f)
     except Exception:
-        return resetar_e_carregar_usuarios()
-
-
-def salvar_usuarios_dict(usuarios):
-    with open(ARQUIVO_USUARIOS, "w") as f:
-        json.dump(usuarios, f, indent=4)
-
-
-def solicitar_novo_cadastro(usuario, email, senha):
-    usuarios = carregar_usuarios()
-    usuario_key = usuario.strip().lower()
-    email_limpo = email.strip().lower()
-
-    usuarios[usuario_key] = {
-        "senha": senha,
-        "email": email_limpo,
-        "status": "pendente",
-        "role": "user",
-    }
-    salvar_usuarios_dict(usuarios)
-
-    cfg = carregar_config_smtp()
-    url_sistema = cfg.get("url_sistema", "http://localhost:8501")
-
-    email_admin = usuarios.get(USUARIO_ADMIN, {}).get("email", "")
-    if email_admin:
-        corpo_admin = f"""
-        <!DOCTYPE html>
-        <html>
-        <head><meta charset="utf-8"></head>
-        <body style="margin: 0; padding: 0; background-color: #2A2927; font-family: 'Segoe UI', Arial, sans-serif;">
-            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 30px auto; background-color: #333230; border-radius: 12px; border: 1px solid #444340; overflow: hidden;">
-                <tr>
-                    <td align="center" style="padding: 25px; background-color: #222120; border-bottom: 3px solid #F39200;">
-                        <h1 style="color: #F39200; font-size: 28px; font-weight: 900; margin: 0;">LOGO</h1>
-                        <p style="color: #aaaaaa; font-size: 12px; margin: 5px 0 0 0; text-transform: uppercase;">Painel do Administrador</p>
-                    </td>
-                </tr>
-                <tr>
-                    <td style="padding: 30px; color: #FFFFFF;">
-                        <h2 style="color: #FFFFFF; font-size: 20px; margin-top: 0;">⏳ Nova Solicitação de Cadastro</h2>
-                        <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Um novo usuário solicitou acesso ao sistema:</p>
-                        <div style="background-color: #2A2927; padding: 15px; border-radius: 8px; border: 1px solid #444340; margin: 15px 0;">
-                            <p style="margin: 5px 0; color: #dddddd; font-size: 14px;"><strong>Usuário:</strong> <span style="color: #F39200;">{usuario_key}</span></p>
-                            <p style="margin: 5px 0; color: #dddddd; font-size: 14px;"><strong>E-mail:</strong> <span style="color: #F39200;">{email_limpo}</span></p>
-                        </div>
-                        <p style="color: #dddddd; font-size: 14px;">Acesse o painel para aprovar ou recusar este cadastro.</p>
-                        <div style="text-align: center; margin-top: 25px;">
-                            <a href="{url_sistema}" target="_blank" style="background-color: #F39200; color: #FFFFFF; text-decoration: none; padding: 12px 25px; border-radius: 6px; font-weight: bold; font-size: 14px; display: inline-block;">Acessar Painel Admin</a>
-                        </div>
-                    </td>
-                </tr>
-            </table>
-        </body>
-        </html>
-        """
-        enviar_notificacao_email(
-            f"[Sistema Recorte] Novo Cadastro Pendente: {usuario_key}",
-            corpo_admin,
-            email_admin,
-        )
-
-
-def alterar_status_usuario(usuario, novo_status):
-    usuarios = carregar_usuarios()
-    if usuario in usuarios:
-        email_destino = (
-            usuarios[usuario].get("email")
-            if isinstance(usuarios[usuario], dict)
-            else None
-        )
-
-        if novo_status == "excluir":
-            del usuarios[usuario]
-        else:
-            usuarios[usuario]["status"] = novo_status
-
-        salvar_usuarios_dict(usuarios)
-
-        cfg = carregar_config_smtp()
-        url_sistema = cfg.get("url_sistema", "http://localhost:8501")
-
-        if novo_status == "aprovado" and email_destino:
-            assunto = "🎉 Seu acesso ao Sistema de Recorte foi Aprovado!"
-            corpo_aprovacao = f"""
-            <!DOCTYPE html>
-            <html>
-            <head><meta charset="utf-8"></head>
-            <body style="margin: 0; padding: 0; background-color: #2A2927; font-family: 'Segoe UI', Arial, sans-serif;">
-                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 30px auto; background-color: #333230; border-radius: 12px; border: 1px solid #444340; overflow: hidden;">
-                    <tr>
-                        <td align="center" style="padding: 25px; background-color: #222120; border-bottom: 3px solid #F39200;">
-                            <h1 style="color: #F39200; font-size: 28px; font-weight: 900; margin: 0;">LOGO</h1>
-                            <p style="color: #aaaaaa; font-size: 12px; margin: 5px 0 0 0; text-transform: uppercase;">Sistema de Recorte de Etiquetas</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td style="padding: 30px; color: #FFFFFF;">
-                            <h2 style="color: #FFFFFF; font-size: 20px; margin-top: 0;">🎉 Cadastro Aprovado!</h2>
-                            <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Olá, <strong>{usuario}</strong>!</p>
-                            <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Sua conta foi <strong>aprovada pelo administrador</strong>. Clique no botão abaixo para acessar a plataforma:</p>
-                            <div style="text-align: center; margin: 30px 0;">
-                                <a href="{url_sistema}" target="_blank" style="background-color: #F39200; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">🚀 Acessar Sistema de Recorte</a>
-                            </div>
-                            <p style="color: #888888; font-size: 12px; text-align: center;">Ou acesse diretamente pelo link: <a href="{url_sistema}" style="color: #F39200;">{url_sistema}</a></p>
-                        </td>
-                    </tr>
-                </table>
-            </body>
-            </html>
-            """
-            enviar_notificacao_email(assunto, corpo_aprovacao, email_destino)
-
-
-def alterar_senha_usuario(usuario, nova_senha):
-    usuarios = carregar_usuarios()
-    if usuario in usuarios:
-        usuarios[usuario]["senha"] = nova_senha
-        salvar_usuarios_dict(usuarios)
-
-
-def alterar_email_usuario(usuario, novo_email):
-    usuarios = carregar_usuarios()
-    if usuario in usuarios:
-        if isinstance(usuarios[usuario], dict):
-            usuarios[usuario]["email"] = novo_email.strip().lower()
-        salvar_usuarios_dict(usuarios)
+        return {}
 
 
 # ESTADO DA SESSÃO
@@ -382,441 +147,139 @@ if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "usuario_logado" not in st.session_state:
     st.session_state.usuario_logado = ""
+if "caminho_zip_temp" not in st.session_state:
+    st.session_state.caminho_zip_temp = None
 
-# --- TELA DE LOGIN, ESQUECI A SENHA & CADASTRO ---
+# --- TELA DE LOGIN ---
 if not st.session_state.autenticado:
-    st.markdown("<br><br>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 1.8, 1])
-
     with col2:
-        st.markdown(
-            f"""
-            <div style="background-color: {COR_FUNDO_CARD}; padding: 25px; border-radius: 12px; border: 1px solid #444340; text-align: center;">
-                <h2 style="color: {COR_LARANJA}; margin-bottom: 5px;">✂️ Sistema de Recorte</h2>
-                <p style="color: #aaaaaa; font-size: 14px; margin:0;">Acesse com sua conta, recupere seu acesso ou crie um novo cadastro</p>
-            </div>
-        """,
-            unsafe_allow_html=True,
-        )
-
-        tab_login, tab_esqueci, tab_cadastro = st.tabs(
-            ["🔑 Entrar", "🔒 Esqueci a Senha", "📝 Criar Conta"]
-        )
+        st.markdown("## ✂️ Login - Sistema de Recorte")
         usuarios_cadastrados = carregar_usuarios()
-
-        # TAB 1: LOGIN
-        with tab_login:
-            with st.form("form_login"):
-                usuario_input = st.text_input("Usuário").strip().lower()
-                senha_input = st.text_input("Senha", type="password")
-                btn_entrar = st.form_submit_button(
-                    "Acessar Plataforma", use_container_width=True
-                )
-
-                if btn_entrar:
-                    if usuario_input in usuarios_cadastrados:
-                        dados_usr = usuarios_cadastrados[usuario_input]
-                        senha_cadastrada = (
-                            dados_usr["senha"]
-                            if isinstance(dados_usr, dict)
-                            else dados_usr
-                        )
-                        status_cadastrado = (
-                            dados_usr.get("status", "aprovado")
-                            if isinstance(dados_usr, dict)
-                            else "aprovado"
-                        )
-
-                        if senha_cadastrada == senha_input:
-                            if status_cadastrado == "aprovado":
-                                st.session_state.autenticado = True
-                                st.session_state.usuario_logado = usuario_input
-                                st.success("Login realizado!")
-                                st.rerun()
-                            else:
-                                st.warning(
-                                    "⏳ Sua conta ainda está aguardando aprovação do"
-                                    " administrador."
-                                )
-                        else:
-                            st.error("Usuário ou senha incorretos.")
-                    else:
-                        st.error("Usuário ou senha incorretos.")
-
-        # TAB 2: ESQUECI A SENHA
-        with tab_esqueci:
-            with st.form("form_esqueci_senha"):
-                email_recuperacao = st.text_input("Digite seu E-mail").strip().lower()
-                nova_senha_rec = st.text_input("Nova Senha", type="password")
-                confirma_nova_senha = st.text_input(
-                    "Confirme a Nova Senha", type="password"
-                )
-                btn_recuperar = st.form_submit_button(
-                    "Redefinir Senha", use_container_width=True
-                )
-
-                if btn_recuperar:
-                    if (
-                        not email_recuperacao
-                        or not nova_senha_rec
-                        or not confirma_nova_senha
-                    ):
-                        st.warning("Preencha todos os campos.")
-                    elif nova_senha_rec != confirma_nova_senha:
-                        st.error("As novas senhas não coincidem.")
-                    else:
-                        usuario_encontrado = None
-                        for usr, dados in usuarios_cadastrados.items():
-                            if (
-                                isinstance(dados, dict)
-                                and dados.get("email", "").lower() == email_recuperacao
-                            ):
-                                usuario_encontrado = usr
-                                break
-
-                        if usuario_encontrado:
-                            alterar_senha_usuario(usuario_encontrado, nova_senha_rec)
-                            st.success(
-                                f"✅ Senha do usuário '{usuario_encontrado}' atualizada com"
-                                " sucesso! Faça login na aba 'Entrar'."
-                            )
-                        else:
-                            st.error("Nenhuma conta encontrada com este e-mail.")
-
-        # TAB 3: CRIAR CONTA
-        with tab_cadastro:
-            with st.form("form_cadastro"):
-                novo_usuario = st.text_input("Escolha um Nome de Usuário").strip().lower()
-                novo_email = st.text_input("Seu E-mail").strip().lower()
-                nova_senha = st.text_input("Escolha uma Senha", type="password")
-                confirma_senha = st.text_input("Confirme a Senha", type="password")
-                btn_cadastrar = st.form_submit_button(
-                    "Solicitar Cadastro", use_container_width=True
-                )
-
-                if btn_cadastrar:
-                    if not novo_usuario or not novo_email or not nova_senha:
-                        st.warning("Preencha todos os campos.")
-                    elif "@" not in novo_email or "." not in novo_email:
-                        st.error("Digite um e-mail válido.")
-                    elif novo_usuario in usuarios_cadastrados:
-                        st.error("Este nome de usuário já existe.")
-                    elif nova_senha != confirma_senha:
-                        st.error("As senhas não coincidem.")
-                    else:
-                        solicitar_novo_cadastro(novo_usuario, novo_email, nova_senha)
-                        st.success(
-                            "✅ Solicitação enviada! O administrador foi notificado."
-                        )
-
+        with st.form("form_login"):
+            usuario_input = st.text_input("Usuário").strip().lower()
+            senha_input = st.text_input("Senha", type="password")
+            if st.form_submit_button("Entrar", use_container_width=True):
+                if (
+                    usuario_input in usuarios_cadastrados
+                    and usuarios_cadastrados[usuario_input]["senha"] == senha_input
+                ):
+                    st.session_state.autenticado = True
+                    st.session_state.usuario_logado = usuario_input
+                    st.rerun()
+                else:
+                    st.error("Usuário ou senha inválidos.")
     st.stop()
 
-# --- SISTEMA PRINCIPAL ---
-
-# VERIFICA SE O USUÁRIO LOGADO É ADMIN
-usuarios_db = carregar_usuarios()
-dados_logado = usuarios_db.get(st.session_state.usuario_logado, {})
-e_admin = (st.session_state.usuario_logado == USUARIO_ADMIN) or (
-    isinstance(dados_logado, dict) and dados_logado.get("role") == "admin"
-)
-
-# --- BARRA LATERAL ---
+# --- NAVEGAÇÃO LATERAL ---
 with st.sidebar:
-    if e_admin:
-        st.markdown(
-            f"👤 **Usuário:** `{st.session_state.usuario_logado}` <span"
-            " class='badge-admin'>👑 ADMIN</span>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(f"👤 **Usuário:** `{st.session_state.usuario_logado}`")
-
-    st.markdown("---")
-    if st.button("🚪 Sair da Conta", use_container_width=True):
+    st.markdown(f"👤 **Usuário:** `{st.session_state.usuario_logado}`")
+    if st.button("🚪 Sair", use_container_width=True):
         st.session_state.autenticado = False
         st.session_state.usuario_logado = ""
         st.rerun()
 
+# --- CARREGAMENTO DO MODELO YOLO ---
+@st.cache_resource
+def carregar_modelo():
+    return YOLO("best.pt")
 
-# --- EXIBIÇÃO DE TEXTO DA LOGO ---
-def renderizar_texto_logo():
-    return f"""
-    <div style="display: flex; justify-content: center; align-items: center; padding: 10px;">
-        <h1 style="
-            color: {COR_LARANJA} !important;
-            font-size: 38px;
-            font-weight: 900;
-            letter-spacing: 3px;
-            margin: 0;
-            text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.8);
-        ">LOGO</h1>
-    </div>
-    """
+try:
+    model = carregar_modelo()
+except Exception as e:
+    st.error(f"Erro ao carregar modelo YOLO: {e}")
+    st.stop()
 
+if platform.system() == "Windows":
+    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
-# --- CABEÇALHO ---
-col_header_logo, col_header_text = st.columns([1.2, 4])
+TERMOS_CHAVE = ["claro", "embratel", "sgp", "ctrl", "patrimonio", "propriedade"]
 
-with col_header_logo:
-    st.markdown(renderizar_texto_logo(), unsafe_allow_html=True)
+# --- INTERFACE PRINCIPAL ---
+st.title("✂️ Recorte de Etiquetas em Lote")
 
-with col_header_text:
+col_upload, col_stats = st.columns([2.0, 1.0])
+
+with col_upload:
+    arquivos_enviados = st.file_uploader(
+        "📂 Envie suas imagens", type=["jpg", "jpeg", "png"], accept_multiple_files=True
+    )
+
+with col_stats:
+    tot_enviadas = len(arquivos_enviados) if arquivos_enviados else 0
     st.markdown(
-        """
-        <div style="padding-top: 5px;">
-            <h1 style="margin:0; font-size: 32px;">Recorte de Etiquetas</h1>
-            <p style="margin: 6px 0 0 0; color: #bbbbbb !important; font-size: 15px;">
-                Envie as fotos das etiquetas para processamento e recorte automático em lote.
-            </p>
+        f"""
+        <div class="metric-card">
+            <div class="metric-value">{tot_enviadas}</div>
+            <div class="metric-label">FOTOS NO LOTE</div>
         </div>
     """,
         unsafe_allow_html=True,
     )
 
-st.markdown("<br>", unsafe_allow_html=True)
+if arquivos_enviados:
+    if st.button("🚀 INICIAR PROCESSAMENTO", use_container_width=True):
+        
+        # Cria diretório temporário no disco para salvar os recortes sem lotar a RAM
+        dir_temp = tempfile.mkdtemp()
+        caminho_zip = os.path.join(dir_temp, "recortes_etiquetas.zip")
+        
+        barra = st.progress(0)
+        status = st.empty()
+        total_fotos = len(arquivos_enviados)
+        recortes_gerados = 0
 
-# --- NAVEGAÇÃO POR ABAS DO SISTEMA ---
-if e_admin:
-    tab_ferramenta, tab_admin = st.tabs(
-        ["✂️ Ferramenta de Recorte", "👑 Painel do Administrador"]
-    )
-else:
-    (tab_ferramenta,) = st.tabs(["✂️ Ferramenta de Recorte"])
-    tab_admin = None
-
-# ==========================================
-# ABA 1: FERRAMENTA DE RECORTE (PRINCIPAL)
-# ==========================================
-with tab_ferramenta:
-    if platform.system() == "Windows":
-        caminho_tesseract = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-        if os.path.exists(caminho_tesseract):
-            pytesseract.pytesseract.tesseract_cmd = caminho_tesseract
-        else:
-            st.error(
-                "⚠️ Tesseract OCR não encontrado em C:\\Program"
-                " Files\\Tesseract-OCR."
-            )
-    else:
-        pytesseract.pytesseract.tesseract_cmd = "tesseract"
-
-    @st.cache_resource
-    def carregar_modelo():
-        if not os.path.exists("best.pt"):
-            st.error("⚠️ O arquivo 'best.pt' não foi encontrado.")
-            st.stop()
-        return YOLO("best.pt")
-
-    try:
-        model = carregar_modelo()
-    except Exception as e:
-        st.error(f"Erro ao carregar o modelo YOLO: {e}")
-        st.stop()
-
-    TERMOS_CHAVE = ["claro", "embratel", "sgp", "ctrl", "patrimonio", "propriedade"]
-
-    if "fila_recortes" not in st.session_state:
-        st.session_state.fila_recortes = {}
-    if "duvidas_pendentes" not in st.session_state:
-        st.session_state.duvidas_pendentes = {}
-
-    col_upload, col_stats = st.columns([2.0, 1.0])
-
-    with col_upload:
-        arquivos_enviados = st.file_uploader(
-            "📂 Selecione ou arraste o lote de fotos aqui",
-            type=["jpg", "jpeg", "png"],
-            accept_multiple_files=True,
-        )
-
-    with col_stats:
-        st.markdown("##### 📊 Painel do Lote")
-        tot_enviadas = len(arquivos_enviados) if arquivos_enviados else 0
-        tot_prontas = len(st.session_state.fila_recortes)
-
-        st.markdown(
-            f"""
-            <div class="metric-card" style="margin-bottom: 10px;">
-                <div class="metric-value">{tot_enviadas}</div>
-                <div class="metric-label">FOTOS CARREGADAS</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-value">{tot_prontas}</div>
-                <div class="metric-label">RECORTES PRONTOS</div>
-            </div>
-        """,
-            unsafe_allow_html=True,
-        )
-
-    if arquivos_enviados:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button(
-            "🚀 INICIAR PROCESSAMENTO DAS FOTOS", use_container_width=True
-        ):
-            st.session_state.fila_recortes = {}
-            st.session_state.duvidas_pendentes = {}
-
-            barra_progresso = st.progress(0)
-            status_texto = st.empty()
-            total_fotos = len(arquivos_enviados)
-
+        with zipfile.ZipFile(caminho_zip, "w", zipfile.ZIP_DEFLATED) as zip_out:
             for idx, arquivo in enumerate(arquivos_enviados):
-                nome_arquivo = arquivo.name
-                status_texto.write(
-                    f"🔍 Analisando imagem ({idx+1}/{total_fotos}):"
-                    f" **{nome_arquivo}**"
-                )
+                status.write(f"Analisando ({idx+1}/{total_fotos}): **{arquivo.name}**")
 
-                file_bytes = np.asarray(bytearray(arquivo.read()), dtype=np.uint8)
+                # Decodifica imagem
+                file_bytes = np.frombuffer(arquivo.read(), np.uint8)
                 img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+                del file_bytes  # Libera memória imediatamente
+                
                 if img is None:
                     continue
-                h_img, w_img, _ = img.shape
 
+                h_img, w_img, _ = img.shape
                 resultados = model(img, conf=0.35, verbose=False)
                 candidatas = []
 
                 for r in resultados:
                     for box in r.boxes:
                         x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
-                        candidatas.append({
-                            "coords": (x1, y1, x2, y2),
-                            "altura": y2 - y1,
-                            "texto_valido": False,
-                        })
+                        candidatas.append((x1, y1, x2, y2))
 
-                if not candidatas:
-                    continue
-
-                etiqueta_escolhida = None
-
-                if len(candidatas) == 1:
-                    etiqueta_escolhida = candidatas[0]
-                else:
-                    for cand in candidatas:
-                        cx1, cy1, cx2, cy2 = cand["coords"]
-                        crop_teste = img[
-                            max(0, cy1 - 5) : min(h_img, cy2 + 5),
-                            max(0, cx1 - 5) : min(w_img, cx2 + 5),
-                        ]
-                        crop_gray = cv2.cvtColor(crop_teste, cv2.COLOR_BGR2GRAY)
-
-                        try:
-                            texto_extraido = pytesseract.image_to_string(
-                                crop_gray, config="--psm 11"
-                            ).lower()
-                            if any(termo in texto_extraido for termo in TERMOS_CHAVE):
-                                cand["texto_valido"] = True
-                        except Exception:
-                            pass
-
-                    validadas = [c for c in candidatas if c["texto_valido"]]
-
-                    if len(validadas) == 1:
-                        etiqueta_escolhida = validadas[0]
-                    else:
-                        st.session_state.duvidas_pendentes[nome_arquivo] = {
-                            "imagem": img,
-                            "candidatas": candidatas,
-                        }
-
-                if etiqueta_escolhida is not None:
-                    x1, y1, x2, y2 = etiqueta_escolhida["coords"]
+                if candidatas:
+                    # Pega a primeira detecção válida ou ajusta lógica
+                    x1, y1, x2, y2 = candidatas[0]
                     y1, y2 = max(0, y1 - 10), min(h_img, y2 + 10)
                     x1, x2 = max(0, x1 - 10), min(w_img, x2 + 10)
+                    
                     recorte = img[y1:y2, x1:x2]
                     _, buffer = cv2.imencode(".png", recorte)
-                    st.session_state.fila_recortes[nome_arquivo] = buffer.tobytes()
+                    
+                    # Salva direto no arquivo ZIP no disco
+                    zip_out.writestr(f"recorte_{arquivo.name}", buffer.tobytes())
+                    recortes_gerados += 1
+                    
+                    del recorte, buffer
 
-                barra_progresso.progress((idx + 1) / total_fotos)
+                del img
+                gc.collect()  # Coletor de lixo força liberação de RAM do Python
+                barra.progress((idx + 1) / total_fotos)
 
-            status_texto.success("✅ Processamento concluído!")
+        st.session_state.caminho_zip_temp = caminho_zip
+        status.success(f"✅ Processamento finalizado! {recortes_gerados} recortes salvos.")
 
-            # --- NOTIFICAÇÃO POR E-MAIL AO USUÁRIO COM BOTÃO E LINK ---
-            db_atualizado = carregar_usuarios()
-            usr_atual = st.session_state.get("usuario_logado", "").strip().lower()
-            dados_usr = db_atualizado.get(usr_atual, {})
-            email_usr_atual = (
-                dados_usr.get("email") if isinstance(dados_usr, dict) else None
-            )
-
-            cfg = carregar_config_smtp()
-            url_sistema = cfg.get("url_sistema", "http://localhost:8501")
-
-            if email_usr_atual:
-                assunto_lote = "📦 Seus recortes de etiquetas estão prontos!"
-                total_recortes = len(st.session_state.fila_recortes)
-
-                corpo_lote = f"""
-                <!DOCTYPE html>
-                <html>
-                <head><meta charset="utf-8"></head>
-                <body style="margin: 0; padding: 0; background-color: #2A2927; font-family: 'Segoe UI', Arial, sans-serif;">
-                    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 30px auto; background-color: #333230; border-radius: 12px; border: 1px solid #444340; overflow: hidden;">
-                        <tr>
-                            <td align="center" style="padding: 25px; background-color: #222120; border-bottom: 3px solid #F39200;">
-                                <h1 style="color: #F39200; font-size: 28px; font-weight: 900; margin: 0;">LOGO</h1>
-                                <p style="color: #aaaaaa; font-size: 12px; margin: 5px 0 0 0; text-transform: uppercase;">Sistema de Recorte de Etiquetas</p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 30px; color: #FFFFFF;">
-                                <h2 style="color: #FFFFFF; font-size: 20px; margin-top: 0;">📦 Seus Recortes Estão Prontos!</h2>
-                                <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Olá, <strong>{usr_atual}</strong>!</p>
-                                <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">O processamento do seu lote de fotos foi concluído com sucesso.</p>
-                                
-                                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #2A2927; border-radius: 8px; margin: 20px 0; padding: 15px; border: 1px solid #444340;">
-                                    <tr>
-                                        <td width="50%" align="center" style="padding: 10px; border-right: 1px solid #444340;">
-                                            <span style="font-size: 24px; font-weight: bold; color: #F39200; display: block;">{total_fotos}</span>
-                                            <span style="font-size: 11px; color: #aaaaaa; text-transform: uppercase;">Fotos Enviadas</span>
-                                        </td>
-                                        <td width="50%" align="center" style="padding: 10px;">
-                                            <span style="font-size: 24px; font-weight: bold; color: #F39200; display: block;">{total_recortes}</span>
-                                            <span style="font-size: 11px; color: #aaaaaa; text-transform: uppercase;">Recortes Gerados</span>
-                                        </td>
-                                    </tr>
-                                </table>
-                                
-                                <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Clique no botão abaixo para ir ao sistema e realizar o download dos recortes:</p>
-                                <div style="text-align: center; margin: 25px 0;">
-                                    <a href="{url_sistema}" target="_blank" style="background-color: #F39200; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">📥 Baixar Recortes na Plataforma</a>
-                                </div>
-                            </td>
-                        </tr>
-                    </table>
-                </body>
-                </html>
-                """
-                enviar_notificacao_email(assunto_lote, corpo_lote, email_usr_atual)
-
-    # --- ÁREA DE DOWNLOAD DO LOTE EM .ZIP E EXIBIÇÃO ---
-    if st.session_state.fila_recortes:
-        st.markdown("---")
-        st.markdown("### 📥 Recortes Prontos")
-
-        # 1. Criação do arquivo ZIP na memória RAM
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            for nome, img_bytes in st.session_state.fila_recortes.items():
-                nome_recorte = f"recorte_{nome}"
-                zip_file.writestr(nome_recorte, img_bytes)
-        
-        zip_buffer.seek(0)
-
-        # 2. Botão NATIVO do Streamlit para realizar o download sem recarregar a página
-        col_down, _ = st.columns([1, 2])
-        with col_down:
-            st.download_button(
-                label="📦 BAIXAR TODOS OS RECORTES (.ZIP)",
-                data=zip_buffer,
-                file_name="etiquetas_recortadas.zip",
-                mime="application/zip",
-                use_container_width=True
-            )
-
-        # 3. Exibição das miniaturas dos recortes
-        cols = st.columns(4)
-        for i, (nome, img_bytes) in enumerate(st.session_state.fila_recortes.items()):
-            with cols[i % 4]:
-                st.image(img_bytes, caption=nome, use_container_width=True)
+# --- BOTÃO DE DOWNLOAD ---
+if st.session_state.caminho_zip_temp and os.path.exists(st.session_state.caminho_zip_temp):
+    st.markdown("---")
+    with open(st.session_state.caminho_zip_temp, "rb") as f:
+        st.download_button(
+            label="📦 BAIXAR TODOS OS RECORTES (.ZIP)",
+            data=f,
+            file_name="etiquetas_recortadas.zip",
+            mime="application/zip",
+            use_container_width=True,
+        )
