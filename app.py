@@ -197,6 +197,14 @@ def alterar_senha_usuario(usuario, nova_senha):
         salvar_usuarios_dict(usuarios)
 
 
+def alterar_email_usuario(usuario, novo_email):
+    usuarios = carregar_usuarios()
+    if usuario in usuarios:
+        if isinstance(usuarios[usuario], dict):
+            usuarios[usuario]["email"] = novo_email.strip().lower()
+        salvar_usuarios_dict(usuarios)
+
+
 # ESTADO DA SESSÃO
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
@@ -285,7 +293,6 @@ if not st.session_state.autenticado:
                     elif nova_senha_rec != confirma_nova_senha:
                         st.error("As novas senhas não coincidem.")
                     else:
-                        # Busca o usuário pelo e-mail
                         usuario_encontrado = None
                         for usr, dados in usuarios_cadastrados.items():
                             if (
@@ -409,7 +416,6 @@ else:
 # ABA 1: FERRAMENTA DE RECORTE (PRINCIPAL)
 # ==========================================
 with tab_ferramenta:
-    # --- CAMINHO TESSERACT ---
     if platform.system() == "Windows":
         caminho_tesseract = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
         if os.path.exists(caminho_tesseract):
@@ -422,7 +428,6 @@ with tab_ferramenta:
     else:
         pytesseract.pytesseract.tesseract_cmd = "tesseract"
 
-    # --- MODELO YOLO ---
     @st.cache_resource
     def carregar_modelo():
         if not os.path.exists("best.pt"):
@@ -438,13 +443,11 @@ with tab_ferramenta:
 
     TERMOS_CHAVE = ["claro", "embratel", "sgp", "ctrl", "patrimonio", "propriedade"]
 
-    # --- FILAS ---
     if "fila_recortes" not in st.session_state:
         st.session_state.fila_recortes = {}
     if "duvidas_pendentes" not in st.session_state:
         st.session_state.duvidas_pendentes = {}
 
-    # --- UPLOAD DE IMAGENS ---
     col_upload, col_stats = st.columns([2.0, 1.0])
 
     with col_upload:
@@ -473,7 +476,6 @@ with tab_ferramenta:
             unsafe_allow_html=True,
         )
 
-    # --- PROCESSAMENTO ---
     if arquivos_enviados:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button(
@@ -559,7 +561,6 @@ with tab_ferramenta:
             status_texto.success("🎉 Processamento concluído com sucesso!")
             st.rerun()
 
-    # --- DÚVIDAS MANUAIS ---
     if st.session_state.duvidas_pendentes:
         st.markdown("---")
         st.markdown("### ⚠️ Decisões Manuais Necessárias")
@@ -603,7 +604,6 @@ with tab_ferramenta:
                         del st.session_state.duvidas_pendentes[nome_foto]
                         st.rerun()
 
-    # --- GALERIA E DOWNLOADS ---
     if st.session_state.fila_recortes:
         st.markdown("---")
         col_titulo, col_dl_zip = st.columns([2.5, 1.5])
@@ -653,13 +653,45 @@ with tab_ferramenta:
 # ==========================================
 if e_admin and tab_admin:
     with tab_admin:
-        st.markdown("## 👑 Painel de Controle de Usuários")
+        st.markdown("## 👑 Painel de Controle do Administrador")
         st.write(
-            "Gerencie solicitações de acesso e contas cadastradas na plataforma."
+            "Gerencie solicitações de acesso, atualize e-mails de contato e controle as contas do sistema."
         )
         st.markdown("<br>", unsafe_allow_html=True)
 
         todos_usuarios = carregar_usuarios()
+
+        # SUB-SEÇÃO DE ALTERAÇÃO DE E-MAIL DO ADMIN / USUÁRIOS
+        st.markdown("### 📧 Alterar E-mail de Usuário / Notificação")
+        with st.form("form_alterar_email"):
+            col_sel, col_em = st.columns([1, 2])
+            with col_sel:
+                usuario_para_editar = st.selectbox(
+                    "Selecione o Usuário",
+                    options=list(todos_usuarios.keys()),
+                    index=0,
+                )
+            with col_em:
+                email_atual = (
+                    todos_usuarios[usuario_para_editar].get("email", "")
+                    if isinstance(todos_usuarios[usuario_para_editar], dict)
+                    else ""
+                )
+                novo_email_input = st.text_input(
+                    "Novo E-mail", value=email_atual
+                ).strip().lower()
+
+            btn_salvar_email = st.form_submit_button("💾 Salvar Novo E-mail")
+
+            if btn_salvar_email:
+                if not novo_email_input or "@" not in novo_email_input or "." not in novo_email_input:
+                    st.error("Por favor, digite um e-mail válido.")
+                else:
+                    alterar_email_usuario(usuario_para_editar, novo_email_input)
+                    st.success(f"✅ E-mail do usuário `{usuario_para_editar}` atualizado para `{novo_email_input}` com sucesso!")
+                    st.rerun()
+
+        st.markdown("<br>", unsafe_allow_html=True)
 
         # SUB-SEÇÃO 1: SOLICITAÇÕES PENDENTES
         pendentes = {
@@ -747,7 +779,7 @@ if e_admin and tab_admin:
                     )
 
             with col_act:
-                if usr != USUARIO_ADMIN:  # Proteção para o admin principal
+                if usr != USUARIO_ADMIN:
                     if st.button("🗑️ Excluir", key=f"del_user_{usr}"):
                         alterar_status_usuario(usr, "excluir")
                         st.success(f"Conta `{usr}` removida!")
