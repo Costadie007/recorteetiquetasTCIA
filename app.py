@@ -582,7 +582,7 @@ with tab_ferramenta:
             for idx, cand in enumerate(candidatas):
                 cx1, cy1, cx2, cy2 = cand["coords"]
                 cy1_m, cy2_m = max(0, cy1 - 10), min(h_img, cy2 + 10)
-                cx1_m, cx2_m = max(0, cx1 - 10), min(h_img, cx2 + 10)
+                cx1_m, cx2_m = max(0, cx1 - 10), min(w_img, cx2 + 10)
                 crop_opcao = img[cy1_m:cy2_m, cx1_m:cx2_m]
                 crop_rgb = cv2.cvtColor(crop_opcao, cv2.COLOR_BGR2RGB)
 
