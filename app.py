@@ -31,6 +31,7 @@ st.set_page_config(
 st.markdown(
     f"""
     <style>
+    /* Oculta o cabeçalho nativo e a barra de ferramentas superior */
     [data-testid="stToolbar"], 
     [data-testid="stHeader"], 
     header, 
@@ -44,8 +45,21 @@ st.markdown(
         display: none !important;
     }}
     
+    /* Oculta o rodapé padrão */
     footer {{
         display: none !important;
+    }}
+
+    /* Oculta o avatar do usuário e o botão da Streamlit Cloud no canto inferior */
+    [data-testid="stStatusWidget"],
+    .viewerBadge_container__1QSob,
+    .viewerBadge_link__1S137,
+    #ConnectionStatus,
+    [data-testid="stConnectionStatus"],
+    iframe[title="streamlitApp"] ~ div,
+    a[href*="streamlit.io"] {{
+        display: none !important;
+        visibility: hidden !important;
     }}
 
     .stApp {{
