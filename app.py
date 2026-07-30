@@ -120,6 +120,8 @@ st.markdown(
         font-weight: bold !important;
         border: none !important;
         box-shadow: 0 4px 12px rgba(243, 146, 0, 0.3) !important;
+        width: 100% !important;
+        padding: 0.75rem !important;
     }}
     [data-testid="stFileUploadDropzone"] {{
         background-color: {COR_FUNDO_CARD} !important;
@@ -270,7 +272,6 @@ def solicitar_novo_cadastro(usuario, email, senha):
     cfg = carregar_config_smtp()
     url_sistema = cfg.get("url_sistema", "http://localhost:8501")
 
-    # Notifica o Administrador sobre o cadastro pendente
     email_admin = usuarios.get(USUARIO_ADMIN, {}).get("email", "")
     if email_admin:
         corpo_admin = f"""
@@ -329,7 +330,6 @@ def alterar_status_usuario(usuario, novo_status):
         cfg = carregar_config_smtp()
         url_sistema = cfg.get("url_sistema", "http://localhost:8501")
 
-        # Dispara e-mail informando o Usuário sobre a Aprovação com Botão/Link
         if novo_status == "aprovado" and email_destino:
             assunto = "🎉 Seu acesso ao Sistema de Recorte foi Aprovado!"
             corpo_aprovacao = f"""
@@ -730,6 +730,8 @@ with tab_ferramenta:
 
                 barra_progresso.progress((idx + 1) / total_fotos)
 
+            status_texto.success("✅ Processamento concluído!")
+
             # --- NOTIFICAÇÃO POR E-MAIL AO USUÁRIO COM BOTÃO E LINK ---
             db_atualizado = carregar_usuarios()
             usr_atual = st.session_state.get("usuario_logado", "").strip().lower()
@@ -780,344 +782,41 @@ with tab_ferramenta:
                                 <div style="text-align: center; margin: 25px 0;">
                                     <a href="{url_sistema}" target="_blank" style="background-color: #F39200; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">📥 Baixar Recortes na Plataforma</a>
                                 </div>
-                                <p style="color: #888888; font-size: 12px; text-align: center;">Ou acesse: <a href="{url_sistema}" style="color: #F39200;">{url_sistema}</a></p>
                             </td>
                         </tr>
                     </table>
                 </body>
                 </html>
                 """
+                enviar_notificacao_email(assunto_lote, corpo_lote, email_usr_atual)
 
-                ok, msg_envio = enviar_notificacao_email(
-                    assunto_lote, corpo_lote, email_usr_atual
-                )
-                if ok:
-                    status_texto.success(
-                        f"🎉 Processamento concluído! E-mail de aviso enviado para"
-                        f" {email_usr_atual}."
-                    )
-                else:
-                    status_texto.warning(
-                        "⚠️ Fotos recortadas com sucesso, mas erro ao enviar e-mail:"
-                        f" {msg_envio}"
-                    )
-            else:
-                status_texto.success("🎉 Processamento concluído com sucesso!")
-
-            st.rerun()
-
-    if st.session_state.duvidas_pendentes:
-        st.markdown("---")
-        st.markdown("### ⚠️ Decisões Manuais Necessárias")
-        st.write(
-            "A IA encontrou múltiplas etiquetas em algumas fotos. Clique na opção"
-            " correta:"
-        )
-
-        fotos_com_duvida = list(st.session_state.duvidas_pendentes.keys())
-
-        for nome_foto in fotos_com_duvida:
-            dados = st.session_state.duvidas_pendentes[nome_foto]
-            img = dados["imagem"]
-            h_img, w_img, _ = img.shape
-            candidatas = dados["candidatas"]
-
-            st.markdown(f"**Foto:** `{nome_foto}`")
-            colunas = st.columns(len(candidatas))
-
-            for idx, cand in enumerate(candidatas):
-                cx1, cy1, cx2, cy2 = cand["coords"]
-                cy1_m, cy2_m = max(0, cy1 - 10), min(h_img, cy2 + 10)
-                cx1_m, cx2_m = max(0, cx1 - 10), min(w_img, cx2 + 10)
-                crop_opcao = img[cy1_m:cy2_m, cx1_m:cx2_m]
-                crop_rgb = cv2.cvtColor(crop_opcao, cv2.COLOR_BGR2RGB)
-
-                with colunas[idx]:
-                    st.image(
-                        crop_rgb, caption=f"Opção {idx + 1}", use_container_width=True
-                    )
-                    if st.button(
-                        f"✓ Selecionar {idx + 1}", key=f"btn_{nome_foto}_{idx}"
-                    ):
-                        x1, y1, x2, y2 = cand["coords"]
-                        y1, y2 = max(0, y1 - 10), min(h_img, y2 + 10)
-                        x1, x2 = max(0, x1 - 10), min(w_img, x2 + 10)
-                        recorte = img[y1:y2, x1:x2]
-                        _, buffer = cv2.imencode(".png", recorte)
-
-                        st.session_state.fila_recortes[nome_foto] = buffer.tobytes()
-                        del st.session_state.duvidas_pendentes[nome_foto]
-                        st.rerun()
-
+    # --- ÁREA DE DOWNLOAD DO LOTE EM .ZIP E EXIBIÇÃO ---
     if st.session_state.fila_recortes:
         st.markdown("---")
-        col_titulo, col_dl_zip = st.columns([2.5, 1.5])
-        with col_titulo:
-            st.markdown(
-                f"### 📥 Recortes Prontos ({len(st.session_state.fila_recortes)})"
-            )
+        st.markdown("### 📥 Recortes Prontos")
 
+        # 1. Criação do arquivo ZIP na memória RAM
         zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(
-            zip_buffer, "a", zipfile.ZIP_DEFLATED, False
-        ) as zip_file:
-            for nome_foto, bytes_img in st.session_state.fila_recortes.items():
-                zip_file.writestr(f"recorte_{nome_foto}", bytes_img)
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            for nome, img_bytes in st.session_state.fila_recortes.items():
+                nome_recorte = f"recorte_{nome}"
+                zip_file.writestr(nome_recorte, img_bytes)
+        
+        zip_buffer.seek(0)
 
-        with col_dl_zip:
+        # 2. Botão NATIVO do Streamlit para realizar o download sem recarregar a página
+        col_down, _ = st.columns([1, 2])
+        with col_down:
             st.download_button(
-                label="📦 BAIXAR TODOS EM .ZIP",
-                data=zip_buffer.getvalue(),
-                file_name="recortes_etiquetas.zip",
+                label="📦 BAIXAR TODOS OS RECORTES (.ZIP)",
+                data=zip_buffer,
+                file_name="etiquetas_recortadas.zip",
                 mime="application/zip",
-                use_container_width=True,
+                use_container_width=True
             )
 
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        recortes_prontos = st.session_state.fila_recortes
-        colunas_galeria = st.columns(4)
-
-        for idx, (nome, bytes_img) in enumerate(recortes_prontos.items()):
-            col_idx = idx % 4
-            with colunas_galeria[col_idx]:
-                st.markdown('<div class="img-card">', unsafe_allow_html=True)
-                st.image(bytes_img, caption=nome, use_container_width=True)
-                st.download_button(
-                    label="📥 Baixar PNG",
-                    data=bytes_img,
-                    file_name=f"recorte_{nome}",
-                    mime="image/png",
-                    key=f"dl_{nome}",
-                    use_container_width=True,
-                )
-                st.markdown("</div>", unsafe_allow_html=True)
-
-# ==========================================
-# ABA 2: EXCLUSIVA DE ADMIN
-# ==========================================
-if e_admin and tab_admin:
-    with tab_admin:
-        st.markdown("## 👑 Painel de Controle do Administrador")
-        st.write(
-            "Gerencie solicitações de acesso, configure o envio de e-mails e controle as contas do sistema."
-        )
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        todos_usuarios = carregar_usuarios()
-
-        # CONFIGURAÇÃO DE E-MAIL E URL DO SISTEMA
-        st.markdown("### ⚙️ Configuração do Servidor de E-mail (SMTP) & URL")
-        cfg_smtp = carregar_config_smtp()
-
-        with st.form("form_smtp_config"):
-            c_serv, c_port = st.columns([3, 1])
-            with c_serv:
-                servidor_input = st.text_input(
-                    "Servidor SMTP",
-                    value=cfg_smtp.get("servidor", "smtp.gmail.com"),
-                )
-            with c_port:
-                porta_input = st.number_input(
-                    "Porta", value=int(cfg_smtp.get("porta", 587))
-                )
-
-            c_rem, c_sen = st.columns([1, 1])
-            with c_rem:
-                remetente_input = st.text_input(
-                    "E-mail Remetente (E-mail do Sistema)",
-                    value=cfg_smtp.get("email_remetente", ""),
-                )
-            with c_sen:
-                senha_input = st.text_input(
-                    "Senha / Senha de App",
-                    value=cfg_smtp.get("senha_app", ""),
-                    type="password",
-                )
-
-            url_input = st.text_input(
-                "🌐 URL do Sistema (Link que será enviado nos e-mails)",
-                value=cfg_smtp.get("url_sistema", "http://localhost:8501"),
-                help="Exemplo: https://meusistema.streamlit.app ou http://seu-ip:8501",
-            )
-
-            btn_salvar_smtp = st.form_submit_button("💾 Salvar Configurações")
-
-            if btn_salvar_smtp:
-                nova_cfg = {
-                    "servidor": servidor_input.strip(),
-                    "porta": int(porta_input),
-                    "email_remetente": remetente_input.strip(),
-                    "senha_app": senha_input.strip(),
-                    "url_sistema": url_input.strip(),
-                }
-                salvar_config_smtp(nova_cfg)
-                st.success("✅ Configurações salvas com sucesso!")
-
-        # BOTÃO DE TESTE DE EMAIL
-        if st.button("🧪 Testar Disparo de E-mail para mim"):
-            url_test = cfg_smtp.get("url_sistema", "http://localhost:8501")
-            ok, msg = enviar_notificacao_email(
-                "Teste de Conexão SMTP",
-                f"""<p>Este é um e-mail de teste do <b>Sistema de Recorte de Etiquetas</b>!</p>
-                <div style="text-align: center; margin-top: 15px;">
-                    <a href="{url_test}" style="background-color: #F39200; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">Testar Link do Sistema</a>
-                </div>""",
-                cfg_smtp.get("email_remetente", ""),
-            )
-            if ok:
-                st.success(msg)
-            else:
-                st.error(msg)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # ALTERAÇÃO DE E-MAIL DO ADMIN / USUÁRIOS
-        st.markdown("### 📧 Alterar E-mail de Notificação do Admin / Usuários")
-        with st.form("form_alterar_email"):
-            col_sel, col_em = st.columns([1, 2])
-            with col_sel:
-                usuario_para_editar = st.selectbox(
-                    "Selecione o Usuário",
-                    options=list(todos_usuarios.keys()),
-                    index=0,
-                )
-            with col_em:
-                email_atual = (
-                    todos_usuarios[usuario_para_editar].get("email", "")
-                    if isinstance(todos_usuarios[usuario_para_editar], dict)
-                    else ""
-                )
-                novo_email_input = st.text_input(
-                    "Novo E-mail", value=email_atual
-                ).strip().lower()
-
-            btn_salvar_email = st.form_submit_button("💾 Salvar Novo E-mail")
-
-            if btn_salvar_email:
-                if (
-                    not novo_email_input
-                    or "@" not in novo_email_input
-                    or "." not in novo_email_input
-                ):
-                    st.error("Por favor, digite um e-mail válido.")
-                else:
-                    alterar_email_usuario(usuario_para_editar, novo_email_input)
-                    st.success(
-                        f"✅ E-mail do usuário `{usuario_para_editar}` atualizado para"
-                        f" `{novo_email_input}` com sucesso!"
-                    )
-                    st.rerun()
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # SOLICITAÇÕES PENDENTES
-        pendentes = {
-            u: d
-            for u, d in todos_usuarios.items()
-            if isinstance(d, dict) and d.get("status") == "pendente"
-        }
-
-        st.markdown("### ⏳ Solicitações Pendentes")
-        if pendentes:
-            for usr, dados in pendentes.items():
-                col_u, col_a, col_r = st.columns([3, 1, 1])
-                with col_u:
-                    email_usr = dados.get("email", "Sem e-mail")
-                    st.markdown(
-                        f"👤 **`{usr}`** (`{email_usr}`) aguardando liberação."
-                    )
-                with col_a:
-                    if st.button("✅ Aprovar", key=f"tab_aprove_{usr}"):
-                        alterar_status_usuario(usr, "aprovado")
-                        st.success(f"Conta '{usr}' aprovada e e-mail enviado!")
-                        st.rerun()
-                with col_r:
-                    if st.button("❌ Recusar", key=f"tab_reject_{usr}"):
-                        alterar_status_usuario(usr, "excluir")
-                        st.info(f"Conta '{usr}' recusada.")
-                        st.rerun()
-                st.markdown(
-                    "<hr style='margin: 5px 0;'>", unsafe_allow_html=True
-                )
-        else:
-            st.info("Nenhuma conta aguardando aprovação no momento.")
-
-        st.markdown("<br><br>", unsafe_allow_html=True)
-
-        # LISTA COMPLETA DE USUÁRIOS
-        st.markdown("### 👥 Todos os Usuários Cadastrados")
-
-        col_header1, col_header2, col_header3, col_header4, col_header5 = (
-            st.columns([1.5, 2, 1, 1, 1.5])
-        )
-        col_header1.markdown("**Usuário**")
-        col_header2.markdown("**E-mail**")
-        col_header3.markdown("**Nível**")
-        col_header4.markdown("**Status**")
-        col_header5.markdown("**Ações**")
-        st.markdown("---")
-
-        for usr, dados in todos_usuarios.items():
-            if isinstance(dados, dict):
-                role = dados.get("role", "user")
-                status = dados.get("status", "aprovado")
-                email_usr = dados.get("email", "N/A")
-            else:
-                role = "user"
-                status = "aprovado"
-                email_usr = "N/A"
-
-            col_usr, col_email, col_role, col_stat, col_act = st.columns(
-                [1.5, 2, 1, 1, 1.5]
-            )
-
-            with col_usr:
-                st.write(f"**`{usr}`**")
-
-            with col_email:
-                st.write(f"`{email_usr}`")
-
-            with col_role:
-                if role == "admin":
-                    st.markdown("👑 **Admin**")
-                else:
-                    st.write("👤 Usuário")
-
-            with col_stat:
-                if status == "aprovado":
-                    st.markdown(
-                        "🟢 <span style='color:#00FF00;'>Aprovado</span>",
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.markdown(
-                        "🟡 <span style='color:#FFFF00;'>Pendente</span>",
-                        unsafe_allow_html=True,
-                    )
-
-            with col_act:
-                if usr != USUARIO_ADMIN:
-                    if st.button("🗑️ Excluir", key=f"del_user_{usr}"):
-                        alterar_status_usuario(usr, "excluir")
-                        st.success(f"Conta `{usr}` removida!")
-                        st.rerun()
-                else:
-                    st.write("*(Protegido)*")
-
-            st.markdown(
-                "<hr style='margin: 3px 0; border-color: #333;'>",
-                unsafe_allow_html=True,
-            )
-
-# --- RODAPÉ ---
-st.markdown("<br><br>", unsafe_allow_html=True)
-st.markdown("---")
-st.markdown(
-    """
-    <div style="text-align: center; padding: 12px 0; color: #888888; font-size: 13px; letter-spacing: 0.5px;">
-        Desenvolvido por <strong>Diego Costa</strong>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+        # 3. Exibição das miniaturas dos recortes
+        cols = st.columns(4)
+        for i, (nome, img_bytes) in enumerate(st.session_state.fila_recortes.items()):
+            with cols[i % 4]:
+                st.image(img_bytes, caption=nome, use_container_width=True)
