@@ -151,6 +151,7 @@ def carregar_config_smtp():
         "porta": 587,
         "email_remetente": "",
         "senha_app": "",
+        "url_sistema": "http://localhost:8501",
     }
 
 
@@ -240,7 +241,10 @@ def solicitar_novo_cadastro(usuario, email, senha):
     }
     salvar_usuarios_dict(usuarios)
 
-    # Notifica o Administrador sobre o cadastro pendente com HTML Responsivo
+    cfg = carregar_config_smtp()
+    url_sistema = cfg.get("url_sistema", "http://localhost:8501")
+
+    # Notifica o Administrador sobre o cadastro pendente
     email_admin = usuarios.get(USUARIO_ADMIN, {}).get("email", "")
     if email_admin:
         corpo_admin = f"""
@@ -264,6 +268,9 @@ def solicitar_novo_cadastro(usuario, email, senha):
                             <p style="margin: 5px 0; color: #dddddd; font-size: 14px;"><strong>E-mail:</strong> <span style="color: #F39200;">{email_limpo}</span></p>
                         </div>
                         <p style="color: #dddddd; font-size: 14px;">Acesse o painel para aprovar ou recusar este cadastro.</p>
+                        <div style="text-align: center; margin-top: 25px;">
+                            <a href="{url_sistema}" target="_blank" style="background-color: #F39200; color: #FFFFFF; text-decoration: none; padding: 12px 25px; border-radius: 6px; font-weight: bold; font-size: 14px; display: inline-block;">Acessar Painel Admin</a>
+                        </div>
                     </td>
                 </tr>
             </table>
@@ -293,7 +300,10 @@ def alterar_status_usuario(usuario, novo_status):
 
         salvar_usuarios_dict(usuarios)
 
-        # Dispara e-mail informando o Usuário sobre a Aprovação com HTML Responsivo
+        cfg = carregar_config_smtp()
+        url_sistema = cfg.get("url_sistema", "http://localhost:8501")
+
+        # Dispara e-mail informando o Usuário sobre a Aprovação com Botão/Link
         if novo_status == "aprovado" and email_destino:
             assunto = "🎉 Seu acesso ao Sistema de Recorte foi Aprovado!"
             corpo_aprovacao = f"""
@@ -312,7 +322,11 @@ def alterar_status_usuario(usuario, novo_status):
                         <td style="padding: 30px; color: #FFFFFF;">
                             <h2 style="color: #FFFFFF; font-size: 20px; margin-top: 0;">🎉 Cadastro Aprovado!</h2>
                             <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Olá, <strong>{usuario}</strong>!</p>
-                            <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Sua conta foi <strong>aprovada pelo administrador</strong>. Você já pode acessar a plataforma e realizar os recortes de etiquetas.</p>
+                            <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Sua conta foi <strong>aprovada pelo administrador</strong>. Clique no botão abaixo para acessar a plataforma:</p>
+                            <div style="text-align: center; margin: 30px 0;">
+                                <a href="{url_sistema}" target="_blank" style="background-color: #F39200; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">🚀 Acessar Sistema de Recorte</a>
+                            </div>
+                            <p style="color: #888888; font-size: 12px; text-align: center;">Ou acesse diretamente pelo link: <a href="{url_sistema}" style="color: #F39200;">{url_sistema}</a></p>
                         </td>
                     </tr>
                 </table>
@@ -690,13 +704,16 @@ with tab_ferramenta:
 
                 barra_progresso.progress((idx + 1) / total_fotos)
 
-            # --- NOTIFICAÇÃO POR E-MAIL AO USUÁRIO (COM LAYOUT HTML RESPONSIVO) ---
+            # --- NOTIFICAÇÃO POR E-MAIL AO USUÁRIO COM BOTÃO E LINK ---
             db_atualizado = carregar_usuarios()
             usr_atual = st.session_state.get("usuario_logado", "").strip().lower()
             dados_usr = db_atualizado.get(usr_atual, {})
             email_usr_atual = (
                 dados_usr.get("email") if isinstance(dados_usr, dict) else None
             )
+
+            cfg = carregar_config_smtp()
+            url_sistema = cfg.get("url_sistema", "http://localhost:8501")
 
             if email_usr_atual:
                 assunto_lote = "📦 Seus recortes de etiquetas estão prontos!"
@@ -732,7 +749,12 @@ with tab_ferramenta:
                                         </td>
                                     </tr>
                                 </table>
-                                <p style="color: #dddddd; font-size: 14px;">Acesse o sistema para fazer o download das imagens ou do pacote .ZIP.</p>
+                                
+                                <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Clique no botão abaixo para ir ao sistema e realizar o download dos recortes:</p>
+                                <div style="text-align: center; margin: 25px 0;">
+                                    <a href="{url_sistema}" target="_blank" style="background-color: #F39200; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">📥 Baixar Recortes na Plataforma</a>
+                                </div>
+                                <p style="color: #888888; font-size: 12px; text-align: center;">Ou acesse: <a href="{url_sistema}" style="color: #F39200;">{url_sistema}</a></p>
                             </td>
                         </tr>
                     </table>
@@ -858,8 +880,8 @@ if e_admin and tab_admin:
 
         todos_usuarios = carregar_usuarios()
 
-        # CONFIGURAÇÃO DE E-MAIL
-        st.markdown("### ⚙️ Configuração do Servidor de E-mail (SMTP)")
+        # CONFIGURAÇÃO DE E-MAIL E URL DO SISTEMA
+        st.markdown("### ⚙️ Configuração do Servidor de E-mail (SMTP) & URL")
         cfg_smtp = carregar_config_smtp()
 
         with st.form("form_smtp_config"):
@@ -887,7 +909,13 @@ if e_admin and tab_admin:
                     type="password",
                 )
 
-            btn_salvar_smtp = st.form_submit_button("💾 Salvar Configuração de E-mail")
+            url_input = st.text_input(
+                "🌐 URL do Sistema (Link que será enviado nos e-mails)",
+                value=cfg_smtp.get("url_sistema", "http://localhost:8501"),
+                help="Exemplo: https://meusistema.streamlit.app ou http://seu-ip:8501",
+            )
+
+            btn_salvar_smtp = st.form_submit_button("💾 Salvar Configurações")
 
             if btn_salvar_smtp:
                 nova_cfg = {
@@ -895,15 +923,20 @@ if e_admin and tab_admin:
                     "porta": int(porta_input),
                     "email_remetente": remetente_input.strip(),
                     "senha_app": senha_input.strip(),
+                    "url_sistema": url_input.strip(),
                 }
                 salvar_config_smtp(nova_cfg)
-                st.success("✅ Configurações de e-mail salvas com sucesso!")
+                st.success("✅ Configurações salvas com sucesso!")
 
         # BOTÃO DE TESTE DE EMAIL
         if st.button("🧪 Testar Disparo de E-mail para mim"):
+            url_test = cfg_smtp.get("url_sistema", "http://localhost:8501")
             ok, msg = enviar_notificacao_email(
                 "Teste de Conexão SMTP",
-                "<p>Este é um e-mail de teste do <b>Sistema de Recorte de Etiquetas</b>!</p>",
+                f"""<p>Este é um e-mail de teste do <b>Sistema de Recorte de Etiquetas</b>!</p>
+                <div style="text-align: center; margin-top: 15px;">
+                    <a href="{url_test}" style="background-color: #F39200; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">Testar Link do Sistema</a>
+                </div>""",
                 cfg_smtp.get("email_remetente", ""),
             )
             if ok:
