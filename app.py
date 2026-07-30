@@ -27,41 +27,44 @@ st.set_page_config(
     page_title="Recorte de Etiquetas", page_icon="✂️", layout="wide"
 )
 
-# --- ESTILIZAÇÃO CSS ---
+# --- ESTILIZAÇÃO CSS & SCRIPT DE REMOÇÃO FORÇADA ---
 st.markdown(
     f"""
     <style>
-    /* Oculta o cabeçalho nativo e a barra de ferramentas superior */
+    /* 1. Oculta barra superior, header, menu e toolbar */
     [data-testid="stToolbar"], 
     [data-testid="stHeader"], 
     header, 
-    #MainMenu {{
+    #MainMenu,
+    .stApp > header {{
         display: none !important;
         visibility: hidden !important;
         height: 0px !important;
     }}
     
-    .stApp > header {{
-        display: none !important;
-    }}
-    
-    /* Oculta o rodapé padrão */
+    /* 2. Oculta o rodapé padrão */
     footer {{
         display: none !important;
     }}
 
-    /* Oculta o avatar do usuário e o botão da Streamlit Cloud no canto inferior */
+    /* 3. Oculta o Viewer Badge, botão da Streamlit Cloud e status de conexão */
     [data-testid="stStatusWidget"],
+    [data-testid="stConnectionStatus"],
     .viewerBadge_container__1QSob,
     .viewerBadge_link__1S137,
     #ConnectionStatus,
-    [data-testid="stConnectionStatus"],
+    div[class*="viewerBadge"],
+    div[class*="stStatusWidget"],
+    div[data-testid="stDecoration"],
     iframe[title="streamlitApp"] ~ div,
     a[href*="streamlit.io"] {{
         display: none !important;
         visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
     }}
 
+    /* Estilização Geral do App */
     .stApp {{
         background-color: {COR_GRAFITE};
         color: {COR_TEXTO};
@@ -144,6 +147,15 @@ st.markdown(
         margin-left: 5px;
     }}
     </style>
+
+    <script>
+    /* Remove elementos remanescentes no iframe pai injetados pela Streamlit Cloud */
+    const removerElementos = () => {{
+        const elementos = parent.document.querySelectorAll('[data-testid="stStatusWidget"], .viewerBadge_container__1QSob, a[href*="streamlit.io"]');
+        elementos.forEach(el => el.remove());
+    }};
+    setInterval(removerElementos, 1000);
+    </script>
 """,
     unsafe_allow_html=True,
 )
