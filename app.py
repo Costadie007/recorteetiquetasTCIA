@@ -769,28 +769,54 @@ if e_admin and tab_admin is not None:
             else:
                 st.info("Nenhuma solicitação de cadastro pendente.")
 
+            # --- TABELA DE USUÁRIOS CADASTRADOS (OPÇÃO 1 INTEGRADA) ---
             st.markdown("<br>### 👥 Usuários Cadastrados no Sistema", unsafe_allow_html=True)
+
             aprovados = {
-                u: d
-                for u, d in all_users.items()
+                u: d for u, d in all_users.items() 
                 if not isinstance(d, dict) or d.get("status") == "aprovado"
             }
 
-            for usr, d in aprovados.items():
-                col_a1, col_a2, col_a3 = st.columns([2, 3, 1])
-                email_usr = d.get("email", "N/A") if isinstance(d, dict) else "N/A"
-                role_usr = d.get("role", "user") if isinstance(d, dict) else "user"
-
-                with col_a1:
-                    st.write(f"👤 **{usr}** ({role_usr})")
-                with col_a2:
-                    st.write(f"✉️ {email_usr}")
-                with col_a3:
-                    if usr != USUARIO_ADMIN and usr != st.session_state.usuario_logado:
-                        if st.button("🗑️ Excluir", key=f"del_{usr}"):
-                            alterar_status_usuario(usr, "excluir")
-                            st.warning(f"Usuário '{usr}' removido.")
-                            st.rerun()
+            if aprovados:
+                dados_tabela = []
+                for usr, d in aprovados.items():
+                    email_usr = d.get("email", "N/A") if isinstance(d, dict) else "N/A"
+                    role_usr = d.get("role", "user") if isinstance(d, dict) else "user"
+                    status_usr = d.get("status", "aprovado") if isinstance(d, dict) else "aprovado"
+                    
+                    dados_tabela.append({
+                        "Usuário": usr,
+                        "E-mail": email_usr,
+                        "Perfil": "👑 Admin" if role_usr == "admin" else "👤 Operador",
+                        "Status": "🟢 Ativo" if status_usr == "aprovado" else "🟡 Pendente"
+                    })
+                
+                st.dataframe(
+                    dados_tabela, 
+                    use_container_width=True, 
+                    hide_index=True
+                )
+                
+                with st.expander("🛠️ Ações e Gerenciamento de Contas"):
+                    usuarios_para_excluir = [
+                        u for u in aprovados.keys() 
+                        if u != USUARIO_ADMIN and u != st.session_state.usuario_logado
+                    ]
+                    
+                    if usuarios_para_excluir:
+                        col_sel, col_btn = st.columns([3, 1])
+                        with col_sel:
+                            usr_selecionado = st.selectbox("Selecione um usuário para remover:", usuarios_para_excluir)
+                        with col_btn:
+                            st.write("<br>", unsafe_allow_html=True)
+                            if st.button("🗑️ Excluir Usuário", use_container_width=True):
+                                alterar_status_usuario(usr_selecionado, "excluir")
+                                st.warning(f"Usuário '{usr_selecionado}' removido.")
+                                st.rerun()
+                    else:
+                        st.info("Nenhum outro usuário disponível para remoção no momento.")
+            else:
+                st.info("Nenhum usuário cadastrado.")
 
         # TAB 2: CONFIGURAÇÃO SMTP
         with tab_adm_smtp:
