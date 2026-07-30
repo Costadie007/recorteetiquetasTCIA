@@ -1,5 +1,4 @@
 import gc
-import io
 import json
 import os
 import platform
@@ -49,7 +48,7 @@ st.markdown(
         display: none !important;
     }}
 
-    /* 3. Oculta o Viewer Badge, botão da Streamlit Cloud e status de conexão */
+    /* 3. Oculta elementos remanescentes da nuvem */
     [data-testid="stStatusWidget"],
     [data-testid="stConnectionStatus"],
     .viewerBadge_container__1QSob,
@@ -134,13 +133,6 @@ st.markdown(
     .stProgress > div > div > div > div {{
         background-color: {COR_LARANJA} !important;
     }}
-    .img-card {{
-        background-color: {COR_FUNDO_CARD};
-        border-radius: 10px;
-        padding: 10px;
-        border: 1px solid #444340;
-        margin-bottom: 15px;
-    }}
     .badge-admin {{
         background-color: {COR_LARANJA};
         color: #000000;
@@ -153,7 +145,6 @@ st.markdown(
     </style>
 
     <script>
-    /* Remove elementos remanescentes no iframe pai injetados pela Streamlit Cloud */
     const removerElementos = () => {{
         const elementos = parent.document.querySelectorAll('[data-testid="stStatusWidget"], .viewerBadge_container__1QSob, a[href*="streamlit.io"]');
         elementos.forEach(el => el.remove());
@@ -217,7 +208,7 @@ def enviar_notificacao_email(assunto, mensagem_html, email_destino):
     except smtplib.SMTPAuthenticationError:
         return False, (
             "Erro de Autenticação: Verifique se usou a 'Senha de App' de 16"
-            " dígitos do Gmail."
+            " dígitos."
         )
     except Exception as e:
         return False, f"Erro ao enviar e-mail: {str(e)}"
@@ -354,7 +345,6 @@ def alterar_status_usuario(usuario, novo_status):
                             <div style="text-align: center; margin: 30px 0;">
                                 <a href="{url_sistema}" target="_blank" style="background-color: #F39200; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">🚀 Acessar Sistema de Recorte</a>
                             </div>
-                            <p style="color: #888888; font-size: 12px; text-align: center;">Ou acesse diretamente pelo link: <a href="{url_sistema}" style="color: #F39200;">{url_sistema}</a></p>
                         </td>
                     </tr>
                 </table>
@@ -368,14 +358,6 @@ def alterar_senha_usuario(usuario, nova_senha):
     usuarios = carregar_usuarios()
     if usuario in usuarios:
         usuarios[usuario]["senha"] = nova_senha
-        salvar_usuarios_dict(usuarios)
-
-
-def alterar_email_usuario(usuario, novo_email):
-    usuarios = carregar_usuarios()
-    if usuario in usuarios:
-        if isinstance(usuarios[usuario], dict):
-            usuarios[usuario]["email"] = novo_email.strip().lower()
         salvar_usuarios_dict(usuarios)
 
 
@@ -408,7 +390,6 @@ if not st.session_state.autenticado:
         )
         usuarios_cadastrados = carregar_usuarios()
 
-        # TAB 1: LOGIN
         with tab_login:
             with st.form("form_login"):
                 usuario_input = st.text_input("Usuário").strip().lower()
@@ -447,7 +428,6 @@ if not st.session_state.autenticado:
                     else:
                         st.error("Usuário ou senha incorretos.")
 
-        # TAB 2: ESQUECI A SENHA
         with tab_esqueci:
             with st.form("form_esqueci_senha"):
                 email_recuperacao = st.text_input("Digite seu E-mail").strip().lower()
@@ -482,12 +462,11 @@ if not st.session_state.autenticado:
                             alterar_senha_usuario(usuario_encontrado, nova_senha_rec)
                             st.success(
                                 f"✅ Senha do usuário '{usuario_encontrado}' atualizada com"
-                                " sucesso! Faça login na aba 'Entrar'."
+                                " sucesso!"
                             )
                         else:
                             st.error("Nenhuma conta encontrada com este e-mail.")
 
-        # TAB 3: CRIAR CONTA
         with tab_cadastro:
             with st.form("form_cadastro"):
                 novo_usuario = st.text_input("Escolha um Nome de Usuário").strip().lower()
@@ -516,8 +495,6 @@ if not st.session_state.autenticado:
     st.stop()
 
 # --- SISTEMA PRINCIPAL ---
-
-# VERIFICA SE O USUÁRIO LOGADO É ADMIN
 usuarios_db = carregar_usuarios()
 dados_logado = usuarios_db.get(st.session_state.usuario_logado, {})
 e_admin = (st.session_state.usuario_logado == USUARIO_ADMIN) or (
@@ -542,7 +519,6 @@ with st.sidebar:
         st.rerun()
 
 
-# --- EXIBIÇÃO DE TEXTO DA LOGO ---
 def renderizar_texto_logo():
     return f"""
     <div style="display: flex; justify-content: center; align-items: center; padding: 10px;">
@@ -558,7 +534,6 @@ def renderizar_texto_logo():
     """
 
 
-# --- CABEÇALHO ---
 col_header_logo, col_header_text = st.columns([1.2, 4])
 
 with col_header_logo:
@@ -579,7 +554,7 @@ with col_header_text:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# --- NAVEGAÇÃO POR ABAS DO SISTEMA ---
+# --- CRIAÇÃO DAS ABAS ---
 if e_admin:
     tab_ferramenta, tab_admin = st.tabs(
         ["✂️ Ferramenta de Recorte", "👑 Painel do Administrador"]
@@ -621,8 +596,6 @@ with tab_ferramenta:
 
     if "fila_recortes" not in st.session_state:
         st.session_state.fila_recortes = {}
-    if "duvidas_pendentes" not in st.session_state:
-        st.session_state.duvidas_pendentes = {}
 
     col_upload, col_stats = st.columns([2.0, 1.0])
 
@@ -658,9 +631,6 @@ with tab_ferramenta:
             "🚀 INICIAR PROCESSAMENTO DAS FOTOS", use_container_width=True
         ):
             st.session_state.fila_recortes = {}
-            st.session_state.duvidas_pendentes = {}
-            
-            # --- CRIA DIRETÓRIO TEMPORÁRIO NO DISCO ---
             dir_temp = tempfile.mkdtemp()
             st.session_state.dir_temp = dir_temp
 
@@ -677,7 +647,7 @@ with tab_ferramenta:
 
                 file_bytes = np.asarray(bytearray(arquivo.read()), dtype=np.uint8)
                 img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-                del file_bytes # Libera memória
+                del file_bytes
 
                 if img is None:
                     continue
@@ -700,134 +670,42 @@ with tab_ferramenta:
                     gc.collect()
                     continue
 
-                etiqueta_escolhida = None
-
-                if len(candidatas) == 1:
-                    etiqueta_escolhida = candidatas[0]
-                else:
-                    for cand in candidatas:
-                        cx1, cy1, cx2, cy2 = cand["coords"]
-                        crop_teste = img[
-                            max(0, cy1 - 5) : min(h_img, cy2 + 5),
-                            max(0, cx1 - 5) : min(w_img, cx2 + 5),
-                        ]
-                        crop_gray = cv2.cvtColor(crop_teste, cv2.COLOR_BGR2GRAY)
-
-                        try:
-                            texto_extraido = pytesseract.image_to_string(
-                                crop_gray, config="--psm 11"
-                            ).lower()
-                            if any(termo in texto_extraido for termo in TERMOS_CHAVE):
-                                cand["texto_valido"] = True
-                        except Exception:
-                            pass
-
-                    validadas = [c for c in candidatas if c["texto_valido"]]
-
-                    if len(validadas) == 1:
-                        etiqueta_escolhida = validadas[0]
-                    else:
-                        st.session_state.duvidas_pendentes[nome_arquivo] = {
-                            "imagem": img,
-                            "candidatas": candidatas,
-                        }
+                etiqueta_escolhida = candidatas[0]
 
                 if etiqueta_escolhida is not None:
                     x1, y1, x2, y2 = etiqueta_escolhida["coords"]
                     y1, y2 = max(0, y1 - 10), min(h_img, y2 + 10)
                     x1, x2 = max(0, x1 - 10), min(w_img, x2 + 10)
                     recorte = img[y1:y2, x1:x2]
-                    
-                    # --- SALVA O RECORTE NO DISCO EM VEZ DA RAM ---
+
                     _, buffer = cv2.imencode(".png", recorte)
-                    caminho_recorte = os.path.join(dir_temp, f"recorte_{nome_arquivo}.png")
+                    caminho_recorte = os.path.join(
+                        dir_temp, f"recorte_{nome_arquivo}.png"
+                    )
                     with open(caminho_recorte, "wb") as f:
                         f.write(buffer.tobytes())
-                    
-                    # Guardamos apenas o CAMINHO (texto) na sessão, não os bytes pesados
+
                     st.session_state.fila_recortes[nome_arquivo] = caminho_recorte
 
-                # --- LIMPEZA DE MEMÓRIA CRÍTICA ---
-                if nome_arquivo not in st.session_state.duvidas_pendentes:
-                    del img # Remove a imagem original pesada da memória
-                
-                gc.collect() # Força o Python a jogar o lixo fora imediatamente
+                del img
+                gc.collect()
                 barra_progresso.progress((idx + 1) / total_fotos)
 
             status_texto.success("✅ Processamento concluído!")
 
-            # --- NOTIFICAÇÃO POR E-MAIL AO USUÁRIO ---
-            db_atualizado = carregar_usuarios()
-            usr_atual = st.session_state.get("usuario_logado", "").strip().lower()
-            dados_usr = db_atualizado.get(usr_atual, {})
-            email_usr_atual = (
-                dados_usr.get("email") if isinstance(dados_usr, dict) else None
-            )
-
-            cfg = carregar_config_smtp()
-            url_sistema = cfg.get("url_sistema", "http://localhost:8501")
-
-            if email_usr_atual:
-                assunto_lote = "📦 Seus recortes de etiquetas estão prontos!"
-                total_recortes = len(st.session_state.fila_recortes)
-
-                corpo_lote = f"""
-                <!DOCTYPE html>
-                <html>
-                <head><meta charset="utf-8"></head>
-                <body style="margin: 0; padding: 0; background-color: #2A2927; font-family: 'Segoe UI', Arial, sans-serif;">
-                    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 30px auto; background-color: #333230; border-radius: 12px; border: 1px solid #444340; overflow: hidden;">
-                        <tr>
-                            <td align="center" style="padding: 25px; background-color: #222120; border-bottom: 3px solid #F39200;">
-                                <h1 style="color: #F39200; font-size: 28px; font-weight: 900; margin: 0;">LOGO</h1>
-                                <p style="color: #aaaaaa; font-size: 12px; margin: 5px 0 0 0; text-transform: uppercase;">Sistema de Recorte de Etiquetas</p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 30px; color: #FFFFFF;">
-                                <h2 style="color: #FFFFFF; font-size: 20px; margin-top: 0;">📦 Seus Recortes Estão Prontos!</h2>
-                                <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Olá, <strong>{usr_atual}</strong>!</p>
-                                <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">O processamento do seu lote de fotos foi concluído com sucesso.</p>
-                                
-                                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #2A2927; border-radius: 8px; margin: 20px 0; padding: 15px; border: 1px solid #444340;">
-                                    <tr>
-                                        <td width="50%" align="center" style="padding: 10px; border-right: 1px solid #444340;">
-                                            <span style="font-size: 24px; font-weight: bold; color: #F39200; display: block;">{total_fotos}</span>
-                                            <span style="font-size: 11px; color: #aaaaaa; text-transform: uppercase;">Fotos Enviadas</span>
-                                        </td>
-                                        <td width="50%" align="center" style="padding: 10px;">
-                                            <span style="font-size: 24px; font-weight: bold; color: #F39200; display: block;">{total_recortes}</span>
-                                            <span style="font-size: 11px; color: #aaaaaa; text-transform: uppercase;">Recortes Gerados</span>
-                                        </td>
-                                    </tr>
-                                </table>
-                                
-                                <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Clique no botão abaixo para ir ao sistema e realizar o download dos recortes:</p>
-                                <div style="text-align: center; margin: 25px 0;">
-                                    <a href="{url_sistema}" target="_blank" style="background-color: #F39200; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">📥 Baixar Recortes na Plataforma</a>
-                                </div>
-                            </td>
-                        </tr>
-                    </table>
-                </body>
-                </html>
-                """
-                enviar_notificacao_email(assunto_lote, corpo_lote, email_usr_atual)
-
-    # --- ÁREA DE DOWNLOAD DO LOTE EM .ZIP E EXIBIÇÃO ---
     if st.session_state.fila_recortes and st.session_state.dir_temp:
         st.markdown("---")
         st.markdown("### 📥 Recortes Prontos")
 
-        # Cria o arquivo ZIP diretamente no disco para não lotar a memória RAM
-        caminho_zip_final = os.path.join(st.session_state.dir_temp, "etiquetas_recortadas.zip")
+        caminho_zip_final = os.path.join(
+            st.session_state.dir_temp, "etiquetas_recortadas.zip"
+        )
         with zipfile.ZipFile(caminho_zip_final, "w", zipfile.ZIP_DEFLATED) as zip_file:
             for nome, caminho_arquivo in st.session_state.fila_recortes.items():
                 nome_recorte = f"recorte_{nome}"
                 if os.path.exists(caminho_arquivo):
                     zip_file.write(caminho_arquivo, arcname=nome_recorte)
 
-        # Lê o ZIP do disco para o botão de download
         col_down, _ = st.columns([1, 2])
         with col_down:
             with open(caminho_zip_final, "rb") as f:
@@ -836,12 +714,103 @@ with tab_ferramenta:
                     data=f,
                     file_name="etiquetas_recortadas.zip",
                     mime="application/zip",
-                    use_container_width=True
+                    use_container_width=True,
                 )
 
-        # Exibição das miniaturas buscando as imagens salvas no disco
         cols = st.columns(4)
-        for i, (nome, caminho_arquivo) in enumerate(st.session_state.fila_recortes.items()):
+        for i, (nome, caminho_arquivo) in enumerate(
+            st.session_state.fila_recortes.items()
+        ):
             with cols[i % 4]:
                 if os.path.exists(caminho_arquivo):
                     st.image(caminho_arquivo, caption=nome, use_container_width=True)
+
+# ==========================================
+# ABA 2: PAINEL DO ADMINISTRADOR
+# ==========================================
+if e_admin and tab_admin is not None:
+    with tab_admin:
+        st.markdown("## 👑 Painel do Administrador")
+        st.write("Gerencie aprovações de contas e configurações de notificação de e-mail.")
+
+        tab_adm_users, tab_adm_smtp = st.tabs(
+            ["👥 Gerenciar Usuários", "✉️ Configuração de E-mail (SMTP)"]
+        )
+
+        # TAB 1: USUÁRIOS
+        with tab_adm_users:
+            all_users = carregar_usuarios()
+
+            st.markdown("### ⏳ Solicitações Pendentes de Aprovação")
+            pendentes = {
+                u: d
+                for u, d in all_users.items()
+                if isinstance(d, dict) and d.get("status") == "pendente"
+            }
+
+            if pendentes:
+                for usr, d in pendentes.items():
+                    col_u1, col_u2, col_u3, col_u4 = st.columns([2, 3, 1, 1])
+                    with col_u1:
+                        st.write(f"**Usuário:** `{usr}`")
+                    with col_u2:
+                        st.write(f"**E-mail:** {d.get('email')}")
+                    with col_u3:
+                        if st.button("✅ Aprovar", key=f"aprov_{usr}"):
+                            alterar_status_usuario(usr, "aprovado")
+                            st.success(f"Usuário '{usr}' aprovado!")
+                            st.rerun()
+                    with col_u4:
+                        if st.button("❌ Recusar", key=f"recus_{usr}"):
+                            alterar_status_usuario(usr, "excluir")
+                            st.info(f"Usuário '{usr}' recusado.")
+                            st.rerun()
+                    st.markdown("---")
+            else:
+                st.info("Nenhuma solicitação de cadastro pendente.")
+
+            st.markdown("<br>### 👥 Usuários Cadastrados no Sistema", unsafe_allow_html=True)
+            aprovados = {
+                u: d
+                for u, d in all_users.items()
+                if not isinstance(d, dict) or d.get("status") == "aprovado"
+            }
+
+            for usr, d in aprovados.items():
+                col_a1, col_a2, col_a3 = st.columns([2, 3, 1])
+                email_usr = d.get("email", "N/A") if isinstance(d, dict) else "N/A"
+                role_usr = d.get("role", "user") if isinstance(d, dict) else "user"
+
+                with col_a1:
+                    st.write(f"👤 **{usr}** ({role_usr})")
+                with col_a2:
+                    st.write(f"✉️ {email_usr}")
+                with col_a3:
+                    if usr != USUARIO_ADMIN and usr != st.session_state.usuario_logado:
+                        if st.button("🗑️ Excluir", key=f"del_{usr}"):
+                            alterar_status_usuario(usr, "excluir")
+                            st.warning(f"Usuário '{usr}' removido.")
+                            st.rerun()
+
+        # TAB 2: CONFIGURAÇÃO SMTP
+        with tab_adm_smtp:
+            st.markdown("### ⚙️ Servidor para envio de e-mails")
+            cfg_atual = carregar_config_smtp()
+
+            with st.form("form_smtp"):
+                srv = st.text_input("Servidor SMTP", value=cfg_atual.get("servidor", "smtp.gmail.com"))
+                porta = st.number_input("Porta", value=int(cfg_atual.get("porta", 587)))
+                remetente = st.text_input("E-mail Remetente", value=cfg_atual.get("email_remetente", ""))
+                senha_app = st.text_input("Senha de App (16 dígitos)", value=cfg_atual.get("senha_app", ""), type="password")
+                url_sys = st.text_input("URL do Sistema (Link dos e-mails)", value=cfg_atual.get("url_sistema", "http://localhost:8501"))
+
+                if st.form_submit_button("💾 Salvar Configurações"):
+                    nova_cfg = {
+                        "servidor": srv,
+                        "porta": porta,
+                        "email_remetente": remetente,
+                        "senha_app": senha_app,
+                        "url_sistema": url_sys,
+                    }
+                    salvar_config_smtp(nova_cfg)
+                    st.success("Configurações de e-mail salvas com sucesso!")
