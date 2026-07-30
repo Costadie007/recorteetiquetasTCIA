@@ -240,21 +240,39 @@ def solicitar_novo_cadastro(usuario, email, senha):
     }
     salvar_usuarios_dict(usuarios)
 
-    # Notifica o Administrador sobre o cadastro pendente
+    # Notifica o Administrador sobre o cadastro pendente com HTML Responsivo
     email_admin = usuarios.get(USUARIO_ADMIN, {}).get("email", "")
     if email_admin:
-        corpo = f"""
-        <h3>✂️ Nova Solicitação de Cadastro</h3>
-        <p>Um novo usuário solicitou acesso ao sistema:</p>
-        <ul>
-            <li><b>Usuário:</b> {usuario_key}</li>
-            <li><b>E-mail:</b> {email_limpo}</li>
-        </ul>
-        <p>Acesse o <b>Painel do Administrador</b> para aprovar ou recusar este cadastro.</p>
+        corpo_admin = f"""
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"></head>
+        <body style="margin: 0; padding: 0; background-color: #2A2927; font-family: 'Segoe UI', Arial, sans-serif;">
+            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 30px auto; background-color: #333230; border-radius: 12px; border: 1px solid #444340; overflow: hidden;">
+                <tr>
+                    <td align="center" style="padding: 25px; background-color: #222120; border-bottom: 3px solid #F39200;">
+                        <h1 style="color: #F39200; font-size: 28px; font-weight: 900; margin: 0;">LOGO</h1>
+                        <p style="color: #aaaaaa; font-size: 12px; margin: 5px 0 0 0; text-transform: uppercase;">Painel do Administrador</p>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 30px; color: #FFFFFF;">
+                        <h2 style="color: #FFFFFF; font-size: 20px; margin-top: 0;">⏳ Nova Solicitação de Cadastro</h2>
+                        <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Um novo usuário solicitou acesso ao sistema:</p>
+                        <div style="background-color: #2A2927; padding: 15px; border-radius: 8px; border: 1px solid #444340; margin: 15px 0;">
+                            <p style="margin: 5px 0; color: #dddddd; font-size: 14px;"><strong>Usuário:</strong> <span style="color: #F39200;">{usuario_key}</span></p>
+                            <p style="margin: 5px 0; color: #dddddd; font-size: 14px;"><strong>E-mail:</strong> <span style="color: #F39200;">{email_limpo}</span></p>
+                        </div>
+                        <p style="color: #dddddd; font-size: 14px;">Acesse o painel para aprovar ou recusar este cadastro.</p>
+                    </td>
+                </tr>
+            </table>
+        </body>
+        </html>
         """
         enviar_notificacao_email(
             f"[Sistema Recorte] Novo Cadastro Pendente: {usuario_key}",
-            corpo,
+            corpo_admin,
             email_admin,
         )
 
@@ -275,15 +293,33 @@ def alterar_status_usuario(usuario, novo_status):
 
         salvar_usuarios_dict(usuarios)
 
-        # Dispara e-mail informando o Usuário sobre a Aprovação
+        # Dispara e-mail informando o Usuário sobre a Aprovação com HTML Responsivo
         if novo_status == "aprovado" and email_destino:
             assunto = "🎉 Seu acesso ao Sistema de Recorte foi Aprovado!"
-            corpo = f"""
-            <h3>Olá, {usuario}!</h3>
-            <p>Sua conta foi <b>aprovada pelo administrador</b>.</p>
-            <p>Você já pode realizar login na plataforma e enviar suas fotos para recorte de etiquetas.</p>
+            corpo_aprovacao = f"""
+            <!DOCTYPE html>
+            <html>
+            <head><meta charset="utf-8"></head>
+            <body style="margin: 0; padding: 0; background-color: #2A2927; font-family: 'Segoe UI', Arial, sans-serif;">
+                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 30px auto; background-color: #333230; border-radius: 12px; border: 1px solid #444340; overflow: hidden;">
+                    <tr>
+                        <td align="center" style="padding: 25px; background-color: #222120; border-bottom: 3px solid #F39200;">
+                            <h1 style="color: #F39200; font-size: 28px; font-weight: 900; margin: 0;">LOGO</h1>
+                            <p style="color: #aaaaaa; font-size: 12px; margin: 5px 0 0 0; text-transform: uppercase;">Sistema de Recorte de Etiquetas</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 30px; color: #FFFFFF;">
+                            <h2 style="color: #FFFFFF; font-size: 20px; margin-top: 0;">🎉 Cadastro Aprovado!</h2>
+                            <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Olá, <strong>{usuario}</strong>!</p>
+                            <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Sua conta foi <strong>aprovada pelo administrador</strong>. Você já pode acessar a plataforma e realizar os recortes de etiquetas.</p>
+                        </td>
+                    </tr>
+                </table>
+            </body>
+            </html>
             """
-            enviar_notificacao_email(assunto, corpo, email_destino)
+            enviar_notificacao_email(assunto, corpo_aprovacao, email_destino)
 
 
 def alterar_senha_usuario(usuario, nova_senha):
@@ -654,24 +690,72 @@ with tab_ferramenta:
 
                 barra_progresso.progress((idx + 1) / total_fotos)
 
-            # --- NOTIFICAÇÃO POR E-MAIL AO USUÁRIO ---
-            usr_atual = st.session_state.usuario_logado
-            email_usr_atual = usuarios_db.get(usr_atual, {}).get("email")
+            # --- NOTIFICAÇÃO POR E-MAIL AO USUÁRIO (COM LAYOUT HTML RESPONSIVO) ---
+            db_atualizado = carregar_usuarios()
+            usr_atual = st.session_state.get("usuario_logado", "").strip().lower()
+            dados_usr = db_atualizado.get(usr_atual, {})
+            email_usr_atual = (
+                dados_usr.get("email") if isinstance(dados_usr, dict) else None
+            )
 
             if email_usr_atual:
                 assunto_lote = "📦 Seus recortes de etiquetas estão prontos!"
-                corpo_lote = f"""
-                <h3>Olá, {usr_atual}!</h3>
-                <p>O processamento do seu lote de fotos foi concluído com sucesso.</p>
-                <ul>
-                    <li><b>Total de fotos enviadas:</b> {total_fotos}</li>
-                    <li><b>Recortes gerados:</b> {len(st.session_state.fila_recortes)}</li>
-                </ul>
-                <p>Acesse o sistema para realizar o download dos arquivos em PNG ou em pacote .ZIP.</p>
-                """
-                enviar_notificacao_email(assunto_lote, corpo_lote, email_usr_atual)
+                total_recortes = len(st.session_state.fila_recortes)
 
-            status_texto.success("🎉 Processamento concluído com sucesso e e-mail enviado ao usuário!")
+                corpo_lote = f"""
+                <!DOCTYPE html>
+                <html>
+                <head><meta charset="utf-8"></head>
+                <body style="margin: 0; padding: 0; background-color: #2A2927; font-family: 'Segoe UI', Arial, sans-serif;">
+                    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 30px auto; background-color: #333230; border-radius: 12px; border: 1px solid #444340; overflow: hidden;">
+                        <tr>
+                            <td align="center" style="padding: 25px; background-color: #222120; border-bottom: 3px solid #F39200;">
+                                <h1 style="color: #F39200; font-size: 28px; font-weight: 900; margin: 0;">LOGO</h1>
+                                <p style="color: #aaaaaa; font-size: 12px; margin: 5px 0 0 0; text-transform: uppercase;">Sistema de Recorte de Etiquetas</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 30px; color: #FFFFFF;">
+                                <h2 style="color: #FFFFFF; font-size: 20px; margin-top: 0;">📦 Seus Recortes Estão Prontos!</h2>
+                                <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Olá, <strong>{usr_atual}</strong>!</p>
+                                <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">O processamento do seu lote de fotos foi concluído com sucesso.</p>
+                                
+                                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #2A2927; border-radius: 8px; margin: 20px 0; padding: 15px; border: 1px solid #444340;">
+                                    <tr>
+                                        <td width="50%" align="center" style="padding: 10px; border-right: 1px solid #444340;">
+                                            <span style="font-size: 24px; font-weight: bold; color: #F39200; display: block;">{total_fotos}</span>
+                                            <span style="font-size: 11px; color: #aaaaaa; text-transform: uppercase;">Fotos Enviadas</span>
+                                        </td>
+                                        <td width="50%" align="center" style="padding: 10px;">
+                                            <span style="font-size: 24px; font-weight: bold; color: #F39200; display: block;">{total_recortes}</span>
+                                            <span style="font-size: 11px; color: #aaaaaa; text-transform: uppercase;">Recortes Gerados</span>
+                                        </td>
+                                    </tr>
+                                </table>
+                                <p style="color: #dddddd; font-size: 14px;">Acesse o sistema para fazer o download das imagens ou do pacote .ZIP.</p>
+                            </td>
+                        </tr>
+                    </table>
+                </body>
+                </html>
+                """
+
+                ok, msg_envio = enviar_notificacao_email(
+                    assunto_lote, corpo_lote, email_usr_atual
+                )
+                if ok:
+                    status_texto.success(
+                        f"🎉 Processamento concluído! E-mail de aviso enviado para"
+                        f" {email_usr_atual}."
+                    )
+                else:
+                    status_texto.warning(
+                        "⚠️ Fotos recortadas com sucesso, mas erro ao enviar e-mail:"
+                        f" {msg_envio}"
+                    )
+            else:
+                status_texto.success("🎉 Processamento concluído com sucesso!")
+
             st.rerun()
 
     if st.session_state.duvidas_pendentes:
