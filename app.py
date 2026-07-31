@@ -731,7 +731,7 @@ with tab_ferramenta:
 if e_admin and tab_admin is not None:
     with tab_admin:
         st.markdown("## 👑 Painel do Administrador")
-        st.write("Gerencie aprovações de contas e configurações de notificação de e-mail.")
+        st.write("Gerencie aprovações de contas, permissões de usuários e configurações de e-mail.")
 
         tab_adm_users, tab_adm_smtp = st.tabs(
             ["👥 Gerenciar Usuários", "✉️ Configuração de E-mail (SMTP)"]
@@ -797,6 +797,44 @@ if e_admin and tab_admin is not None:
                     hide_index=True
                 )
                 
+                # --- NOVO RECURSO: ALTERAR PERMISSÕES DE USUÁRIOS (IDEIA 3) ---
+                with st.expander("⚡ Alterar Permissões (Promover / Rebaixar)"):
+                    usuarios_alteraveis = [u for u in aprovados.keys() if u != USUARIO_ADMIN]
+                    
+                    if usuarios_alteraveis:
+                        col_usr_perm, col_role_perm, col_btn_perm = st.columns([2, 2, 1])
+                        with col_usr_perm:
+                            usr_perm_sel = st.selectbox("Selecione o Usuário:", usuarios_alteraveis, key="sel_usr_perm")
+                        
+                        role_atual = aprovados[usr_perm_sel].get("role", "user") if isinstance(aprovados[usr_perm_sel], dict) else "user"
+                        
+                        with col_role_perm:
+                            nova_role = st.selectbox(
+                                "Novo Perfil:", 
+                                ["user", "admin"], 
+                                index=1 if role_atual == "admin" else 0,
+                                format_func=lambda x: "👑 Admin" if x == "admin" else "👤 Operador",
+                                key="sel_role_perm"
+                            )
+                        with col_btn_perm:
+                            st.write("<br>", unsafe_allow_html=True)
+                            if st.button("💾 Salvar Perfil", use_container_width=True):
+                                if isinstance(all_users[usr_perm_sel], dict):
+                                    all_users[usr_perm_sel]["role"] = nova_role
+                                else:
+                                    all_users[usr_perm_sel] = {
+                                        "senha": all_users[usr_perm_sel],
+                                        "email": "N/A",
+                                        "status": "aprovado",
+                                        "role": nova_role
+                                    }
+                                salvar_usuarios_dict(all_users)
+                                st.success(f"Perfil de '{usr_perm_sel}' alterado com sucesso!")
+                                st.rerun()
+                    else:
+                        st.info("Nenhum outro usuário disponível para alterar permissões no momento.")
+
+                # GERENCIADOR DE EXCLUSÃO DE CONTAS
                 with st.expander("🛠️ Ações e Gerenciamento de Contas"):
                     usuarios_para_excluir = [
                         u for u in aprovados.keys() 
