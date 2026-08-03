@@ -83,15 +83,6 @@ st.markdown("""
         color: #ffffff;
     }
     
-    .candidate-card {
-        background-color: #2c2c2e;
-        border: 2px solid #3a3a3c;
-        border-radius: 10px;
-        padding: 10px;
-        text-align: center;
-        margin-bottom: 10px;
-    }
-    
     .footer-text {
         text-align: center;
         color: #8e8e93;
@@ -213,13 +204,9 @@ def converter_imagem_para_bytes(img_rgb):
     return None
 
 # ==============================================================================
-# ALGORITMO AVANÇADO DE DETECÇÃO DE ETIQUETA COM SELEÇÃO INTELIGENTE
+# ALGORITMO DE DETECÇÃO DE ETIQUETA
 # ==============================================================================
 def extrair_candidatos_etiqueta(imagem_bytes):
-    """
-    Identifica regiões candidatas a etiquetas com código de barras.
-    Retorna uma lista de recortes ordenados por relevância.
-    """
     image_np = np.frombuffer(imagem_bytes, np.uint8)
     img_bgr = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
     if img_bgr is None:
@@ -228,7 +215,7 @@ def extrair_candidatos_etiqueta(imagem_bytes):
     h_orig, w_orig = img_bgr.shape[:2]
     candidatos = []
 
-    # Método A: Detector de Código de Barras do OpenCV (Seguro)
+    # Método A: Detector de Código de Barras OpenCV
     try:
         detector = None
         if hasattr(cv2, 'barcode') and hasattr(cv2.barcode, 'BarcodeDetector'):
@@ -244,7 +231,6 @@ def extrair_candidatos_etiqueta(imagem_bytes):
                     x_min, y_min = np.min(pts, axis=0)
                     x_max, y_max = np.max(pts, axis=0)
                     
-                    # Expansão calculada para pegar a etiqueta inteira (texto + código)
                     pad_w = int((x_max - x_min) * 0.30)
                     pad_h = int((y_max - y_min) * 1.50)
                     
@@ -260,7 +246,7 @@ def extrair_candidatos_etiqueta(imagem_bytes):
     except Exception:
         pass
 
-    # Método B: Análise Morfológica em Grayscale (Formato da Etiqueta Embratel)
+    # Método B: Análise Morfológica em Grayscale
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 5))
     grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
@@ -274,14 +260,12 @@ def extrair_candidatos_etiqueta(imagem_bytes):
         aspect_ratio = float(w) / max(h, 1)
         area = w * h
         
-        # Filtro de etiqueta retangular alongada
         if aspect_ratio >= 1.8 and area > (w_orig * h_orig * 0.005):
             x1, y1 = max(0, x - 12), max(0, y - 12)
             x2, y2 = min(w_orig, x + w + 12), min(h_orig, y + h + 12)
             
             crop = img_bgr[y1:y2, x1:x2]
             if crop.size > 0:
-                # Evita duplicados visuais
                 candidatos.append({
                     "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
                     "confianca": "media"
@@ -370,7 +354,7 @@ def renderizar_autenticacao():
                             st.rerun()
 
 # ==============================================================================
-# FERRAMENTA DE RECORTE COM LAYOUT DISTRIBUÍDO E MODO DE DÚVIDA
+# FERRAMENTA DE RECORTE
 # ==============================================================================
 def renderizar_ferramenta_recorte():
     col_upload, col_painel = st.columns([2.2, 1])
@@ -399,16 +383,12 @@ def renderizar_ferramenta_recorte():
                     st.warning("⚠️ Nenhuma etiqueta detectada automaticamente nesta imagem.")
                 
                 elif len(candidatos) == 1 and candidatos[0]["confianca"] == "alta":
-                    # Recorte perfeito direto (sem necessidade de intervenção)
                     img_recortada = candidatos[0]["imagem"]
                     st.image(img_recortada, width=350, caption="Etiqueta Recortada com Precisão")
                     recortes_finais.append((f"etiqueta_{idx+1}.png", converter_imagem_para_bytes(img_recortada)))
                 
                 else:
-                    # MODO DE DÚVIDA / MÚLTIPLAS OPÇÕES (LAYOUT SIMPLES E BEM DISTRIBUÍDO)
                     st.info("🤔 **Identificamos mais de uma opção.** Escolha a etiqueta correta abaixo:")
-                    
-                    # Distribuição horizontal limpa em colunas
                     cols = st.columns(min(len(candidatos), 3))
                     
                     for c_idx, cand in enumerate(candidatos[:3]):
@@ -422,7 +402,6 @@ def renderizar_ferramenta_recorte():
                                 st.session_state.selecoes_usuario[idx] = c_idx
                                 st.rerun()
                     
-                    # Adiciona a selecionada pelo usuário caso tenha escolhido
                     opcao_escolhida = st.session_state.selecoes_usuario.get(idx)
                     if opcao_escolhida is not None and opcao_escolhida < len(candidatos):
                         img_sel = candidatos[opcao_escolhida]["imagem"]
@@ -461,13 +440,20 @@ def renderizar_ferramenta_recorte():
             )
 
 # ==============================================================================
-# PAINEL DO ADMINISTRADOR
+# PAINEL DO ADMINISTRADOR (COM BOTÕES DE REFRESH/ATUALIZAÇÃO)
 # ==============================================================================
 def renderizar_painel_admin():
     st.markdown("### ⚙️ Painel do Administrador")
     t1, t2, t3 = st.tabs(["Aprovação de Usuários", "👥 Gerenciar Usuários", "Configuração SMTP"])
     
     with t1:
+        col_titulo, col_btn = st.columns([3, 1])
+        with col_titulo:
+            st.markdown("#### Solicitações Pendentes")
+        with col_btn:
+            if st.button("🔄 Atualizar Lista", key="btn_refresh_pendentes"):
+                st.rerun()
+
         usuarios = carregar_usuarios()
         pendentes = {e: d for e, d in usuarios.items() if d.get("status") == "pendente_aprovação_admin"}
         
@@ -475,15 +461,27 @@ def renderizar_painel_admin():
             st.info("Nenhuma conta pendente de aprovação no momento.")
         else:
             for email, d in pendentes.items():
-                st.write(f"**Nome:** {d['nome']} | **E-mail:** {email}")
-                if st.button("Aprovar Acesso", key=f"ap_{email}"):
-                    usuarios[email]["status"] = "ativo"
-                    salvar_usuarios(usuarios)
-                    enviar_notificacao_aprovacao(email, d['nome'])
-                    st.success(f"Acesso aprovado para {email}!")
-                    st.rerun()
+                with st.container():
+                    col_info, col_acao = st.columns([3, 1])
+                    with col_info:
+                        st.markdown(f"**Nome:** {d['nome']}  \n**E-mail:** `{email}`")
+                    with col_acao:
+                        if st.button("✅ Aprovar Acesso", key=f"ap_{email}"):
+                            usuarios[email]["status"] = "ativo"
+                            salvar_usuarios(usuarios)
+                            enviar_notificacao_aprovacao(email, d['nome'])
+                            st.success(f"Acesso aprovado para {d['nome']}!")
+                            st.rerun()
+                st.write("---")
 
     with t2:
+        col_t2_head, col_t2_btn = st.columns([3, 1])
+        with col_t2_head:
+            st.markdown("#### Todos os Usuários")
+        with col_t2_btn:
+            if st.button("🔄 Atualizar Tabela", key="btn_refresh_tabela"):
+                st.rerun()
+                
         usuarios = carregar_usuarios()
         dados_tabela = [{"Nome": u.get("nome"), "E-mail": e, "Cargo": u.get("cargo"), "Status": u.get("status")} for e, u in usuarios.items()]
         st.dataframe(dados_tabela, use_container_width=True)
