@@ -18,7 +18,7 @@ except ImportError:
     YOLO_DISPONIVEL = False
 
 # ==============================================================================
-# CONFIGURAÇÕES DA PÁGINA E CSS (DESIGN EXATO DA SUA INTERFACE)
+# CONFIGURAÇÕES DA PÁGINA E CSS
 # ==============================================================================
 st.set_page_config(
     page_title="Sistema de Recorte",
@@ -26,7 +26,6 @@ st.set_page_config(
     layout="centered"
 )
 
-# Estilização CSS customizada para reproduzir exatamente a interface da imagem
 st.markdown("""
     <style>
     /* Ocultar elementos nativos do Streamlit */
@@ -63,14 +62,6 @@ st.markdown("""
         color: #a1a1a6;
         font-size: 14px;
         margin-top: 10px;
-    }
-    
-    /* Container dos Formulários */
-    .form-card {
-        background-color: #2c2c2e;
-        border-radius: 12px;
-        padding: 25px;
-        border: 1px solid #3a3a3c;
     }
     
     /* Inputs customizados */
@@ -234,10 +225,9 @@ if "email_em_verificacao" not in st.session_state:
     st.session_state.email_em_verificacao = None
 
 # ==============================================================================
-# INTERFACE DE AUTENTICAÇÃO (O DESIGN DA FOTO)
+# INTERFACE DE AUTENTICAÇÃO
 # ==============================================================================
 def renderizar_autenticacao():
-    # Banner Topo (Card do Titulo da foto)
     st.markdown("""
         <div class="header-card">
             <div class="header-title">
@@ -249,7 +239,6 @@ def renderizar_autenticacao():
         </div>
     """, unsafe_allow_html=True)
 
-    # Abas com os ícones exatamente como no print
     aba_login, aba_esqueci, aba_cadastro = st.tabs([
         "🔑 Entrar", 
         "🔒 Esqueci a Senha", 
@@ -259,7 +248,7 @@ def renderizar_autenticacao():
     # --- ABA 1: ENTRAR ---
     with aba_login:
         with st.form("form_login"):
-            usuario = st.text_input("Usuário (E-mail)").strip().lower()
+            usuario = st.text_input("Usuário").strip().lower()
             senha = st.text_input("Senha", type="password")
             btn_entrar = st.form_submit_button("Acessar Plataforma")
             
@@ -298,14 +287,13 @@ def renderizar_autenticacao():
                 else:
                     st.error("E-mail não encontrado.")
 
-    # --- ABA 3: CRIAR CONTA (COM CÓDIGO DE VERIFICAÇÃO INTEGRADO) ---
+    # --- ABA 3: CRIAR CONTA (SEM CAMPO DE CARGO) ---
     with aba_cadastro:
         if st.session_state.etapa_cadastro == "formulario":
             with st.form("form_criar"):
                 nome = st.text_input("Nome Completo")
                 email = st.text_input("E-mail Corporativo").strip().lower()
                 senha = st.text_input("Crie uma Senha", type="password")
-                cargo = st.selectbox("Cargo Solicitado", ["Operador", "Administrador"])
                 btn_cadastrar = st.form_submit_button("Enviar e Enviar Código")
                 
                 if btn_cadastrar:
@@ -319,7 +307,7 @@ def renderizar_autenticacao():
                         usuarios[email] = {
                             "nome": nome,
                             "senha": gerar_hash_senha(senha),
-                            "cargo": cargo,
+                            "cargo": "Operador",  # Define 'Operador' automaticamente como padrão
                             "status": "pendente_email",
                             "codigo_verificacao": codigo,
                             "email_verificado": False
@@ -398,12 +386,17 @@ def renderizar_painel_admin():
             st.info("Nenhuma conta pendente de aprovação.")
         else:
             for email, d in pendentes.items():
-                st.write(f"**Nome:** {d['nome']} | **E-mail:** {email} | **Cargo:** {d['cargo']}")
+                st.write(f"**Nome:** {d['nome']} | **E-mail:** {email}")
+                
+                # Permite ao Admin escolher/confirmar o Cargo antes de aprovar
+                novo_cargo = st.selectbox(f"Definir Cargo para {d['nome']}", ["Operador", "Administrador"], key=f"cargo_{email}")
+                
                 col1, col2 = st.columns(6)
                 if col1.button("Aprovar", key=f"ap_{email}"):
+                    usuarios[email]["cargo"] = novo_cargo
                     usuarios[email]["status"] = "ativo"
                     salvar_usuarios(usuarios)
-                    st.success(f"{email} aprovado!")
+                    st.success(f"{email} aprovado como {novo_cargo}!")
                     st.rerun()
                 if col2.button("Rejeitar", key=f"rej_{email}"):
                     del usuarios[email]
