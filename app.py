@@ -420,7 +420,8 @@ def renderizar_painel_admin():
                 st.write(f"**Nome:** {d['nome']} | **E-mail:** {email}")
                 novo_cargo = st.selectbox(f"Definir Cargo para {d['nome']}", ["Operador", "Administrador"], key=f"cargo_{email}")
                 
-                col1, col2 = st.columns(6)
+                # Ajuste no número de colunas para evitar o ValueError
+                col1, col2, _ = st.columns([1, 1, 4])
                 if col1.button("Aprovar", key=f"ap_{email}"):
                     usuarios[email]["cargo"] = novo_cargo
                     usuarios[email]["status"] = "ativo"
@@ -453,7 +454,7 @@ def main():
     if not st.session_state.usuario_logado:
         renderizar_autenticacao()
     else:
-        # Cabeçalho Principal (Igual à Foto 2)
+        # Cabeçalho Principal (Igual ao modelo visual desejado)
         c_head1, c_head2 = st.columns([1, 4])
         with c_head1:
             st.markdown("<h1 style='font-size: 38px; margin: 0;'>LOGO</h1>", unsafe_allow_html=True)
@@ -465,7 +466,6 @@ def main():
 
         st.write("")
         
-        # Botão de Sair no topo direito / perfil
         user_nome = st.session_state.usuario_logado['nome']
         cargo = st.session_state.usuario_logado["cargo"]
         
@@ -485,7 +485,7 @@ def main():
             st.session_state.usuario_logado = None
             st.rerun()
 
-    # Rodapé estilo Foto 2
+    # Rodapé
     st.markdown("""
         <div class="footer-text">
             Desenvolvido por <b>Diego Costa</b>
