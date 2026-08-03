@@ -23,7 +23,7 @@ except ImportError:
 # CONFIGURAÇÕES DA PÁGINA (WIDE) E CSS CUSTOMIZADO
 # ==============================================================================
 st.set_page_config(
-    page_title="Recorte de Etiquetas",
+    page_title="Recorte de Etiquetas - EMBRATEL",
     page_icon="✂️",
     layout="wide"
 )
@@ -35,7 +35,7 @@ st.markdown("""
     footer {visibility: hidden;}
     #MainMenu {visibility: hidden;}
     
-    /* Fundo escuro */
+    /* Fundo escuro estilo macOS */
     .stApp {
         background-color: #1c1c1e;
         color: #ffffff;
@@ -75,17 +75,16 @@ st.markdown("""
     /* Botões */
     .stButton > button, .stDownloadButton > button {
         width: 100%;
-        background-color: #2c2c2e;
+        background-color: #ff9500;
         color: #ffffff;
-        border: 1px solid #3a3a3c;
+        border: none;
         border-radius: 8px;
-        padding: 10px 16px;
-        font-weight: 600;
+        padding: 12px 16px;
+        font-weight: bold;
         transition: all 0.3s ease;
     }
     .stButton > button:hover, .stDownloadButton > button:hover {
-        background-color: #3a3a3c;
-        border-color: #545458;
+        background-color: #e08300;
         color: #ffffff;
     }
     
@@ -105,7 +104,6 @@ ARQUIVO_USUARIOS = "usuarios.json"
 ARQUIVO_SMTP = "config_smtp.json"
 MODELO_YOLO_PATH = "best.pt"
 
-# ⚠️ ALTERE PARA A URL EXATA DO SEU APP NO STREAMLIT CLOUD
 URL_APLICACAO = "https://recorteetiquetastcia.streamlit.app" 
 
 if os.name == 'nt':
@@ -204,7 +202,6 @@ def enviar_notificacao_aprovacao(email_destino, nome_usuario):
     """
     return enviar_email_smtp(email_destino, assunto, corpo)
 
-# Conversor de Array NumPy (RGB) para Bytes de Imagem (PNG)
 def converter_imagem_para_bytes(img_rgb):
     img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
     is_success, buffer = cv2.imencode(".png", img_bgr)
@@ -213,7 +210,7 @@ def converter_imagem_para_bytes(img_rgb):
     return None
 
 # ==============================================================================
-# VISÃO COMPUTACIONAL & RECORTE DE ETIQUETAS
+# ALGORITMO ESPECIALIZADO DE RECORTE (CÓDIGO DE BARRAS / ETIQUETAS EMBRATEL)
 # ==============================================================================
 @st.cache_resource
 def carregar_modelo_yolo():
@@ -223,6 +220,71 @@ def carregar_modelo_yolo():
         except Exception:
             return None
     return None
+
+def recortar_etiqueta_especifica(img_bgr):
+    """
+    Detecta etiquetas retangulares horizontais com código de barras 
+    (como as da Embratel/Ctrl SGP) expandindo a margem para capturar o texto e o número.
+    """
+    h_orig, w_orig = img_bgr.shape[:2]
+    recortes = []
+    
+    # 1. Tentativa via detector de Código de Barras nativo do OpenCV
+    detector = cv2.BarcodeDetector()
+    ok, decoded_info, decoded_type, points = detector.detectAndDecode(img_bgr)
+    
+    if ok and points is not None:
+        for pts in points:
+            pts = pts.astype(int)
+            x_min, y_min = np.min(pts, axis=0)
+            x_max, y_max = np.max(pts, axis=0)
+            
+            # Expande a caixa do código de barras para pegar o cabeçalho e os números
+            pad_w = int((x_max - x_min) * 0.15)
+            pad_h = int((y_max - y_min) * 1.2)
+            
+            x1 = max(0, x_min - pad_w)
+            y1 = max(0, y_min - pad_h)
+            x2 = min(w_orig, x_max + pad_w)
+            y2 = min(h_orig, y_max + pad_h)
+            
+            crop = img_bgr[y1:y2, x1:x2]
+            if crop.size > 0:
+                recortes.append({
+                    "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
+                    "box": (x1, y1, x2, y2)
+                })
+
+    # 2. Se a detecção direta falhar, utiliza contornos de retângulos claros/brancos
+    if not recortes:
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        
+        # Filtro de morfologia para fechar barras pretas e unificar a etiqueta
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 7))
+        grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
+        _, thresh = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            aspect_ratio = float(w) / h
+            area = w * h
+            
+            # Filtra retângulos com proporção típica de etiquetas de código de barras
+            if aspect_ratio > 1.8 and area > (w_orig * h_orig * 0.01):
+                # Margem de segurança de 5px
+                x1, y1 = max(0, x - 5), max(0, y - 5)
+                x2, y2 = min(w_orig, x + w + 5), min(h_orig, y + h + 5)
+                
+                crop = img_bgr[y1:y2, x1:x2]
+                recortes.append({
+                    "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
+                    "box": (x1, y1, x2, y2)
+                })
+
+    return recortes
 
 def processar_etiqueta(imagem_bytes):
     image_np = np.frombuffer(imagem_bytes, np.uint8)
@@ -239,38 +301,25 @@ def processar_etiqueta(imagem_bytes):
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 x1, y1 = max(0, x1), max(0, y1)
                 x2, y2 = min(w_orig, x2), min(h_orig, y2)
-                
                 crop = img[y1:y2, x1:x2]
                 if crop.size > 0:
-                    crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
                     recortes.append({
-                        "imagem": crop_rgb,
+                        "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
                         "box": (x1, y1, x2, y2)
                     })
-    else:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        for cnt in contours:
-            x, y, w, h = cv2.boundingRect(cnt)
-            if w > 50 and h > 50:
-                crop = img[y:y+h, x:x+w]
-                crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-                recortes.append({
-                    "imagem": crop_rgb,
-                    "box": (x, y, x+w, y+h)
-                })
-                
+
+    # Se o YOLO não pegar, aciona nosso motor especialista OpenCV
     if not recortes:
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        recortes.append({"imagem": img_rgb, "box": (0, 0, w_orig, h_orig)})
+        recortes = recortar_etiqueta_especifica(img)
+
+    # Fallback final: se ainda não pegar nada, devolve a imagem tratada
+    if not recortes:
+        recortes.append({"imagem": cv2.cvtColor(img, cv2.COLOR_BGR2RGB), "box": (0, 0, w_orig, h_orig)})
 
     return recortes
 
 # ==============================================================================
-# CONTROLE DE SESSÃO
+# CONTROLE DE SESSÃO E TELA DE LOGIN
 # ==============================================================================
 if "usuario_logado" not in st.session_state:
     st.session_state.usuario_logado = None
@@ -279,9 +328,6 @@ if "etapa_cadastro" not in st.session_state:
 if "email_em_verificacao" not in st.session_state:
     st.session_state.email_em_verificacao = None
 
-# ==============================================================================
-# TELA DE AUTENTICAÇÃO
-# ==============================================================================
 def renderizar_autenticacao():
     col_v1, col_center, col_v2 = st.columns([1, 2, 1])
     with col_center:
@@ -403,18 +449,18 @@ def renderizar_autenticacao():
                     st.rerun()
 
 # ==============================================================================
-# PAINEL DE FERRAMENTA DE RECORTE (DOWNLOAD DE IMAGENS & ZIP)
+# PAINEL DA FERRAMENTA DE RECORTE & COMPACTAÇÃO ZIP
 # ==============================================================================
 def renderizar_ferramenta_recorte():
     col_upload, col_painel = st.columns([2.2, 1])
     
     total_fotos = 0
     total_recortes = 0
-    todos_recortes_bytes = [] # Para a criação do arquivo .ZIP
+    todos_recortes_bytes = []
     
     with col_upload:
         arquivos = st.file_uploader(
-            "📁 Selecione ou arraste o lote de fotos aqui", 
+            "📁 Selecione ou arraste fotos de etiquetas (Embratel / Códigos de Barra)", 
             type=["jpg", "png", "jpeg"], 
             accept_multiple_files=True
         )
@@ -431,26 +477,22 @@ def renderizar_ferramenta_recorte():
                 c_original, c_recortes = st.columns([1, 1])
                 
                 with c_original:
-                    st.image(bytes_img, use_container_width=True, caption="Imagem Original")
+                    st.image(bytes_img, use_container_width=True, caption="Foto Original")
                 
                 with c_recortes:
-                    st.markdown("##### ✂️ Recortes Detectados:")
+                    st.markdown("##### ✂️ Etiquetas Recortadas:")
                     for i, r in enumerate(recortes):
-                        st.image(r["imagem"], use_container_width=True, caption=f"Recorte #{i+1}")
+                        st.image(r["imagem"], use_container_width=True, caption=f"Etiqueta #{i+1}")
                         
-                        # Converte recorte para bytes para download
                         img_bytes = converter_imagem_para_bytes(r["imagem"])
                         if img_bytes:
-                            nome_arquivo_recorte = f"recorte_{idx+1}_{i+1}.png"
+                            nome_etiqueta = f"etiqueta_{idx+1}_{i+1}.png"
+                            todos_recortes_bytes.append((nome_etiqueta, img_bytes))
                             
-                            # Adiciona à lista geral para o ZIP
-                            todos_recortes_bytes.append((nome_arquivo_recorte, img_bytes))
-                            
-                            # Botão de download individual
                             st.download_button(
-                                label=f"⬇️ Baixar Recorte #{i+1}",
+                                label=f"⬇️ Baixar Etiqueta #{i+1}",
                                 data=img_bytes,
-                                file_name=nome_arquivo_recorte,
+                                file_name=nome_etiqueta,
                                 mime="image/png",
                                 key=f"dl_{idx}_{i}"
                             )
@@ -465,22 +507,23 @@ def renderizar_ferramenta_recorte():
             </div>
             <div class="stat-card">
                 <div class="stat-number">{total_recortes}</div>
-                <div class="stat-label">Recortes Prontos</div>
+                <div class="stat-label">Etiquetas Identificadas</div>
             </div>
         """, unsafe_allow_html=True)
 
-        # Botão para Baixar Todos os Recortes em arquivo .ZIP
         if todos_recortes_bytes:
+            # GERAÇÃO DO ARQUIVO ZIP COM TODOS OS RECORTES
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for nome_arq, dados_bytes in todos_recortes_bytes:
                     zip_file.writestr(nome_arq, dados_bytes)
             
             st.write("---")
+            st.markdown("#### 📦 Download em Massa")
             st.download_button(
-                label="📦 Baixar Todos os Recortes (.ZIP)",
+                label="⬇️ BAIXAR TODAS AS ETIQUETAS (.ZIP)",
                 data=zip_buffer.getvalue(),
-                file_name="todos_os_recortes.zip",
+                file_name="etiquetas_recortadas.zip",
                 mime="application/zip",
                 key="btn_download_zip_lote"
             )
@@ -492,7 +535,6 @@ def renderizar_painel_admin():
     st.markdown("### ⚙️ Painel do Administrador")
     t1, t2, t3 = st.tabs(["Aprovação de Usuários", "👥 Gerenciar Usuários", "Configuração SMTP"])
     
-    # --- ABA 1: APROVAÇÃO DE USUÁRIOS ---
     with t1:
         c_top1, c_top2 = st.columns([3, 1])
         with c_top1:
@@ -535,7 +577,6 @@ def renderizar_painel_admin():
                     st.warning("Solicitação removida.")
                     st.rerun()
 
-    # --- ABA 2: GERENCIAR E REMOVER USUÁRIOS ---
     with t2:
         st.markdown("#### Usuários Cadastrados no Sistema")
         usuarios = carregar_usuarios()
@@ -568,7 +609,6 @@ def renderizar_painel_admin():
                     st.success(f"Usuário {usuario_para_remover} removido com sucesso!")
                     st.rerun()
 
-    # --- ABA 3: CONFIGURAÇÃO SMTP ---
     with t3:
         cfg = carregar_config_smtp()
         with st.form("f_smtp"):
@@ -595,7 +635,7 @@ def main():
         with c_head2:
             st.markdown("""
                 <h1 style='font-size: 32px; margin: 0;'>Recorte de Etiquetas</h1>
-                <p style='color: #a1a1a6; margin-top: 5px;'>Envie as fotos das etiquetas para processamento e recorte automático em lote.</p>
+                <p style='color: #a1a1a6; margin-top: 5px;'>Identificação e recorte automático de etiquetas com Código de Barras / Embratel.</p>
             """, unsafe_allow_html=True)
 
         st.write("")
