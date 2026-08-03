@@ -23,25 +23,22 @@ except ImportError:
 # CONFIGURAÇÕES DA PÁGINA (WIDE) E CSS CUSTOMIZADO
 # ==============================================================================
 st.set_page_config(
-    page_title="Recorte de Etiquetas - EMBRATEL",
+    page_title="Recorte de Etiquetas EMBRATEL",
     page_icon="✂️",
     layout="wide"
 )
 
 st.markdown("""
     <style>
-    /* Ocultar elementos nativos do Streamlit */
     header {visibility: hidden;}
     footer {visibility: hidden;}
     #MainMenu {visibility: hidden;}
     
-    /* Fundo escuro estilo macOS */
     .stApp {
         background-color: #1c1c1e;
         color: #ffffff;
     }
     
-    /* Inputs */
     div[data-baseweb="input"] {
         background-color: #2c2c2e !important;
         border-color: #3a3a3c !important;
@@ -49,7 +46,6 @@ st.markdown("""
         color: #ffffff !important;
     }
     
-    /* Cards de Estatísticas */
     .stat-card {
         background-color: #2c2c2e;
         border: 1px solid #3a3a3c;
@@ -72,7 +68,6 @@ st.markdown("""
         font-weight: 600;
     }
     
-    /* Botões */
     .stButton > button, .stDownloadButton > button {
         width: 100%;
         background-color: #ff9500;
@@ -88,7 +83,6 @@ st.markdown("""
         color: #ffffff;
     }
     
-    /* Rodapé */
     .footer-text {
         text-align: center;
         color: #8e8e93;
@@ -104,7 +98,9 @@ ARQUIVO_USUARIOS = "usuarios.json"
 ARQUIVO_SMTP = "config_smtp.json"
 MODELO_YOLO_PATH = "best.pt"
 
-URL_APLICACAO = "https://recorteetiquetastcia.streamlit.app" 
+# ⚠️ AJUSTE AQUI PARA O LINK CORRETO DO SEU SERVIDOR / STREAMLIT CLOUD
+# Exemplo local: "http://localhost:8501" ou o link do Streamlit Cloud
+URL_APLICACAO = "https://recorteetiquetas.streamlit.app/"
 
 if os.name == 'nt':
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -188,17 +184,21 @@ def enviar_codigo_email(email_destino, codigo):
 def enviar_notificacao_aprovacao(email_destino, nome_usuario):
     assunto = "🎉 Seu Acesso Foi Aprovado - Recorte de Etiquetas"
     corpo = f"""
-    <div style="font-family: Arial, sans-serif; background-color: #2c2c2e; color: #ffffff; padding: 25px; border-radius: 8px;">
-        <h2 style="color: #34c759; margin-top: 0;">Conta Aprovada!</h2>
-        <p>Olá, <b>{nome_usuario}</b>!</p>
-        <p>Sua solicitação de cadastro foi aprovada pelo Administrador. Você já pode acessar a plataforma para realizar os recortes de etiquetas.</p>
-        <div style="margin: 30px 0; text-align: center;">
-            <a href="{URL_APLICACAO}" style="background-color: #ff9500; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
-                🚀 Acessar o Sistema
-            </a>
+    <html>
+    <body style="font-family: Arial, sans-serif; background-color: #1c1c1e; color: #ffffff; padding: 30px;">
+        <div style="background-color: #2c2c2e; padding: 25px; border-radius: 8px; max-width: 500px; margin: auto;">
+            <h2 style="color: #34c759; margin-top: 0;">Conta Aprovada!</h2>
+            <p>Olá, <b>{nome_usuario}</b>!</p>
+            <p>Sua solicitação de cadastro foi aprovada pelo Administrador. Clique no link abaixo para acessar:</p>
+            <p style="margin: 25px 0;">
+                <a href="{URL_APLICACAO}" target="_blank" style="background-color: #ff9500; color: #ffffff; padding: 12px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+                    🚀 Acessar Sistema de Etiquetas
+                </a>
+            </p>
+            <p style="font-size: 12px; color: #a1a1a6;">Link direto: <a href="{URL_APLICACAO}" style="color: #ff9500;">{URL_APLICACAO}</a></p>
         </div>
-        <p style="font-size: 12px; color: #a1a1a6;">Se o botão não funcionar, acesse via o link: <br><a href="{URL_APLICACAO}" style="color: #ff9500;">{URL_APLICACAO}</a></p>
-    </div>
+    </body>
+    </html>
     """
     return enviar_email_smtp(email_destino, assunto, corpo)
 
@@ -210,28 +210,18 @@ def converter_imagem_para_bytes(img_rgb):
     return None
 
 # ==============================================================================
-# ALGORITMO ESPECIALIZADO DE RECORTE (CÓDIGO DE BARRAS / ETIQUETAS EMBRATEL)
+# DETECTOR EXCLUSIVO DE ETIQUETAS COM CÓDIGO DE BARRAS (EMBRATEL/PATRIMÔNIO)
 # ==============================================================================
-@st.cache_resource
-def carregar_modelo_yolo():
-    if YOLO_DISPONIVEL and os.path.exists(MODELO_YOLO_PATH):
-        try:
-            return YOLO(MODELO_YOLO_PATH)
-        except Exception:
-            return None
-    return None
-
-def recortar_etiqueta_especifica(img_bgr):
-    """
-    Detecta etiquetas retangulares horizontais com código de barras 
-    (como as da Embratel/Ctrl SGP) expandindo a margem para capturar o texto e o número.
-    """
+def recortar_somente_etiquetas_validas(imagem_bytes):
+    image_np = np.frombuffer(imagem_bytes, np.uint8)
+    img_bgr = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
     h_orig, w_orig = img_bgr.shape[:2]
-    recortes = []
     
-    # 1. Tentativa via detector de Código de Barras nativo do OpenCV
+    recortes_encontrados = []
+
+    # 1. Detector NATIVO de Código de Barras do OpenCV
     detector = cv2.BarcodeDetector()
-    ok, decoded_info, decoded_type, points = detector.detectAndDecode(img_bgr)
+    ok, _, _, points = detector.detectAndDecode(img_bgr)
     
     if ok and points is not None:
         for pts in points:
@@ -239,9 +229,9 @@ def recortar_etiqueta_especifica(img_bgr):
             x_min, y_min = np.min(pts, axis=0)
             x_max, y_max = np.max(pts, axis=0)
             
-            # Expande a caixa do código de barras para pegar o cabeçalho e os números
-            pad_w = int((x_max - x_min) * 0.15)
-            pad_h = int((y_max - y_min) * 1.2)
+            # Expande a caixa para abranger o logo azul acima e os números abaixo
+            pad_w = int((x_max - x_min) * 0.25)
+            pad_h = int((y_max - y_min) * 1.40)
             
             x1 = max(0, x_min - pad_w)
             y1 = max(0, y_min - pad_h)
@@ -250,17 +240,15 @@ def recortar_etiqueta_especifica(img_bgr):
             
             crop = img_bgr[y1:y2, x1:x2]
             if crop.size > 0:
-                recortes.append({
+                recortes_encontrados.append({
                     "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
                     "box": (x1, y1, x2, y2)
                 })
 
-    # 2. Se a detecção direta falhar, utiliza contornos de retângulos claros/brancos
-    if not recortes:
+    # 2. Se a detecção falhar, aplica filtro morfológico restrito a retângulos bem largos
+    if not recortes_encontrados:
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-        
-        # Filtro de morfologia para fechar barras pretas e unificar a etiqueta
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 7))
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 7))
         grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
         _, thresh = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
@@ -269,57 +257,26 @@ def recortar_etiqueta_especifica(img_bgr):
         
         for cnt in contours:
             x, y, w, h = cv2.boundingRect(cnt)
-            aspect_ratio = float(w) / h
+            aspect_ratio = float(w) / max(h, 1)
             area = w * h
             
-            # Filtra retângulos com proporção típica de etiquetas de código de barras
-            if aspect_ratio > 1.8 and area > (w_orig * h_orig * 0.01):
-                # Margem de segurança de 5px
-                x1, y1 = max(0, x - 5), max(0, y - 5)
-                x2, y2 = min(w_orig, x + w + 5), min(h_orig, y + h + 5)
+            # Requisitos estritos: retângulo bem horizontal (largura > 2x altura)
+            if aspect_ratio >= 2.0 and area > (w_orig * h_orig * 0.008):
+                x1, y1 = max(0, x - 10), max(0, y - 10)
+                x2, y2 = min(w_orig, x + w + 10), min(h_orig, y + h + 10)
                 
                 crop = img_bgr[y1:y2, x1:x2]
-                recortes.append({
-                    "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
-                    "box": (x1, y1, x2, y2)
-                })
-
-    return recortes
-
-def processar_etiqueta(imagem_bytes):
-    image_np = np.frombuffer(imagem_bytes, np.uint8)
-    img = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
-    h_orig, w_orig = img.shape[:2]
-    
-    modelo = carregar_modelo_yolo()
-    recortes = []
-    
-    if modelo:
-        resultados = modelo(img)
-        for r in resultados:
-            for box in r.boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(w_orig, x2), min(h_orig, y2)
-                crop = img[y1:y2, x1:x2]
                 if crop.size > 0:
-                    recortes.append({
+                    recortes_encontrados.append({
                         "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
                         "box": (x1, y1, x2, y2)
                     })
 
-    # Se o YOLO não pegar, aciona nosso motor especialista OpenCV
-    if not recortes:
-        recortes = recortar_etiqueta_especifica(img)
-
-    # Fallback final: se ainda não pegar nada, devolve a imagem tratada
-    if not recortes:
-        recortes.append({"imagem": cv2.cvtColor(img, cv2.COLOR_BGR2RGB), "box": (0, 0, w_orig, h_orig)})
-
-    return recortes
+    # Retorna SOMENTE os recortes que bateram com o padrão (zero imagens inteiras de fallback)
+    return recortes_encontrados
 
 # ==============================================================================
-# CONTROLE DE SESSÃO E TELA DE LOGIN
+# CONTROLE DE SESSÃO E LOGIN
 # ==============================================================================
 if "usuario_logado" not in st.session_state:
     st.session_state.usuario_logado = None
@@ -334,7 +291,7 @@ def renderizar_autenticacao():
         st.markdown("""
             <div style="text-align: center; margin-bottom: 30px; margin-top: 40px;">
                 <h1 style="font-size: 36px; font-weight: bold; margin: 0;">LOGO &nbsp;&nbsp;&nbsp;&nbsp; Recorte de Etiquetas</h1>
-                <p style="color: #a1a1a6; font-size: 14px; margin-top: 10px;">Acesse com sua conta, recupere seu acesso ou crie um novo cadastro</p>
+                <p style="color: #a1a1a6; font-size: 14px; margin-top: 10px;">Acesse para recortar e baixar etiquetas Embratel / Códigos de Barras</p>
             </div>
         """, unsafe_allow_html=True)
 
@@ -449,7 +406,7 @@ def renderizar_autenticacao():
                     st.rerun()
 
 # ==============================================================================
-# PAINEL DA FERRAMENTA DE RECORTE & COMPACTAÇÃO ZIP
+# TELA DE RECORTE E DOWNLOAD (.ZIP EXCLUSIVO)
 # ==============================================================================
 def renderizar_ferramenta_recorte():
     col_upload, col_painel = st.columns([2.2, 1])
@@ -460,7 +417,7 @@ def renderizar_ferramenta_recorte():
     
     with col_upload:
         arquivos = st.file_uploader(
-            "📁 Selecione ou arraste fotos de etiquetas (Embratel / Códigos de Barra)", 
+            "📁 Envie fotos contendo etiquetas (Embratel / Código de Barras)", 
             type=["jpg", "png", "jpeg"], 
             accept_multiple_files=True
         )
@@ -470,32 +427,35 @@ def renderizar_ferramenta_recorte():
             st.write("---")
             for idx, arq in enumerate(arquivos):
                 bytes_img = arq.getvalue()
-                recortes = processar_etiqueta(bytes_img)
-                total_recortes += len(recortes)
+                recortes = recortar_somente_etiquetas_validas(bytes_img)
                 
                 st.markdown(f"### 📷 Foto #{idx+1}: `{arq.name}`")
                 c_original, c_recortes = st.columns([1, 1])
                 
                 with c_original:
-                    st.image(bytes_img, use_container_width=True, caption="Foto Original")
+                    st.image(bytes_img, use_container_width=True, caption="Foto Enviada")
                 
                 with c_recortes:
-                    st.markdown("##### ✂️ Etiquetas Recortadas:")
-                    for i, r in enumerate(recortes):
-                        st.image(r["imagem"], use_container_width=True, caption=f"Etiqueta #{i+1}")
-                        
-                        img_bytes = converter_imagem_para_bytes(r["imagem"])
-                        if img_bytes:
-                            nome_etiqueta = f"etiqueta_{idx+1}_{i+1}.png"
-                            todos_recortes_bytes.append((nome_etiqueta, img_bytes))
+                    if not recortes:
+                        st.warning("⚠️ Nenhuma etiqueta no padrão com código de barras encontrada nesta foto.")
+                    else:
+                        st.markdown("##### ✂️ Etiquetas Recortadas:")
+                        for i, r in enumerate(recortes):
+                            total_recortes += 1
+                            st.image(r["imagem"], use_container_width=True, caption=f"Etiqueta Validade #{total_recortes}")
                             
-                            st.download_button(
-                                label=f"⬇️ Baixar Etiqueta #{i+1}",
-                                data=img_bytes,
-                                file_name=nome_etiqueta,
-                                mime="image/png",
-                                key=f"dl_{idx}_{i}"
-                            )
+                            img_bytes = converter_imagem_para_bytes(r["imagem"])
+                            if img_bytes:
+                                nome_etiqueta = f"etiqueta_{total_recortes}.png"
+                                todos_recortes_bytes.append((nome_etiqueta, img_bytes))
+                                
+                                st.download_button(
+                                    label=f"⬇️ Baixar Etiqueta #{total_recortes} (.PNG)",
+                                    data=img_bytes,
+                                    file_name=nome_etiqueta,
+                                    mime="image/png",
+                                    key=f"dl_{idx}_{i}"
+                                )
 
     with col_painel:
         st.markdown("### 📊 Painel do Lote")
@@ -503,27 +463,27 @@ def renderizar_ferramenta_recorte():
         st.markdown(f"""
             <div class="stat-card">
                 <div class="stat-number">{total_fotos}</div>
-                <div class="stat-label">Fotos Carregadas</div>
+                <div class="stat-label">Fotos Processadas</div>
             </div>
             <div class="stat-card">
                 <div class="stat-number">{total_recortes}</div>
-                <div class="stat-label">Etiquetas Identificadas</div>
+                <div class="stat-label">Etiquetas Válidas Recortadas</div>
             </div>
         """, unsafe_allow_html=True)
 
+        # O ZIP SÓ CONTERÁ AS ETIQUETAS FILTRADAS
         if todos_recortes_bytes:
-            # GERAÇÃO DO ARQUIVO ZIP COM TODOS OS RECORTES
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for nome_arq, dados_bytes in todos_recortes_bytes:
                     zip_file.writestr(nome_arq, dados_bytes)
             
             st.write("---")
-            st.markdown("#### 📦 Download em Massa")
+            st.markdown("#### 📦 Download em Lote")
             st.download_button(
-                label="⬇️ BAIXAR TODAS AS ETIQUETAS (.ZIP)",
+                label=f"⬇️ BAIXAR {total_recortes} ETIQUETAS (.ZIP)",
                 data=zip_buffer.getvalue(),
-                file_name="etiquetas_recortadas.zip",
+                file_name="etiquetas_filtradas.zip",
                 mime="application/zip",
                 key="btn_download_zip_lote"
             )
@@ -635,7 +595,7 @@ def main():
         with c_head2:
             st.markdown("""
                 <h1 style='font-size: 32px; margin: 0;'>Recorte de Etiquetas</h1>
-                <p style='color: #a1a1a6; margin-top: 5px;'>Identificação e recorte automático de etiquetas com Código de Barras / Embratel.</p>
+                <p style='color: #a1a1a6; margin-top: 5px;'>Identificador e extrator exclusivo de etiquetas padrão Embratel.</p>
             """, unsafe_allow_html=True)
 
         st.write("")
