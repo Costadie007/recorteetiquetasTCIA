@@ -1,880 +1,452 @@
-import gc
-import json
-import os
-import platform
-import smtplib
-import tempfile
-import zipfile
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-
+import streamlit as st
 import cv2
 import numpy as np
 import pytesseract
-import streamlit as st
-from ultralytics import YOLO
+import json
+import os
+import smtplib
+import random
+import string
+import hashlib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
-# --- CONFIGURAÇÃO DE ADMINISTRADOR ---
-USUARIO_ADMIN = "diego.costa"
+try:
+    from ultralytics import YOLO
+    YOLO_DISPONIVEL = True
+except ImportError:
+    YOLO_DISPONIVEL = False
 
-# --- PALETA DE CORES PERSONALIZADA ---
-COR_GRAFITE = "#2A2927"
-COR_LARANJA = "#F39200"
-COR_FUNDO_CARD = "#333230"
-COR_TEXTO = "#FFFFFF"
-
-# --- CONFIGURAÇÃO DA PÁGINA ---
+# ==============================================================================
+# CONFIGURAÇÕES DA PÁGINA E CSS (DESIGN EXATO DA SUA INTERFACE)
+# ==============================================================================
 st.set_page_config(
-    page_title="Recorte de Etiquetas", page_icon="✂️", layout="wide"
+    page_title="Sistema de Recorte",
+    page_icon="✂️",
+    layout="centered"
 )
 
-# --- ESTILIZAÇÃO CSS & SCRIPT DE REMOÇÃO FORÇADA ---
-st.markdown(
-    f"""
+# Estilização CSS customizada para reproduzir exatamente a interface da imagem
+st.markdown("""
     <style>
-    /* 1. Oculta barra superior, header, menu e toolbar */
-    [data-testid="stToolbar"], 
-    [data-testid="stHeader"], 
-    header, 
-    #MainMenu,
-    .stApp > header {{
-        display: none !important;
-        visibility: hidden !important;
-        height: 0px !important;
-    }}
+    /* Ocultar elementos nativos do Streamlit */
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    #MainMenu {visibility: hidden;}
     
-    /* 2. Oculta o rodapé padrão */
-    footer {{
-        display: none !important;
-    }}
-
-    /* 3. Oculta elementos remanescentes da nuvem */
-    [data-testid="stStatusWidget"],
-    [data-testid="stConnectionStatus"],
-    .viewerBadge_container__1QSob,
-    .viewerBadge_link__1S137,
-    #ConnectionStatus,
-    div[class*="viewerBadge"],
-    div[class*="stStatusWidget"],
-    div[data-testid="stDecoration"],
-    iframe[title="streamlitApp"] ~ div,
-    a[href*="streamlit.io"] {{
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-    }}
-
-    /* Estilização Geral do App */
-    .stApp {{
-        background-color: {COR_GRAFITE};
-        color: {COR_TEXTO};
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    }}
-    div.block-container {{
-        padding-top: 1rem !important;
-        padding-bottom: 2rem;
-        max-width: 92%;
-    }}
-    h1, h2, h3, h4, h5, h6, p, span, label {{
-        color: {COR_TEXTO} !important;
-    }}
-    .metric-card {{
-        background-color: {COR_FUNDO_CARD};
-        border: 1px solid #444340;
-        border-radius: 10px;
-        padding: 12px 8px;
-        text-align: center;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    }}
-    .metric-value {{
-        font-size: 26px;
-        font-weight: bold;
-        color: {COR_LARANJA} !important;
-        line-height: 1.1;
-        margin-bottom: 4px;
-    }}
-    .metric-label {{
-        font-size: 11px;
-        color: #aaaaaa !important;
-        letter-spacing: 0.5px;
-    }}
-    .stButton>button {{
-        background: linear-gradient(90deg, {COR_LARANJA} 0%, #d88100 100%) !important;
-        color: #FFFFFF !important;
-        border-radius: 8px !important;
-        font-weight: bold !important;
-        font-size: 16px !important;
-        border: none !important;
-        padding: 0.6rem 1.2rem !important;
-        box-shadow: 0 4px 15px rgba(243, 146, 0, 0.3) !important;
-        transition: all 0.3s ease !important;
-    }}
-    .stButton>button:hover {{
-        transform: translateY(-2px) !important;
-        box-shadow: 0 6px 20px rgba(243, 146, 0, 0.5) !important;
-    }}
-    .stDownloadButton>button {{
-        background-color: {COR_LARANJA} !important;
-        color: #FFFFFF !important;
-        border-radius: 8px !important;
-        font-weight: bold !important;
-        border: none !important;
-        box-shadow: 0 4px 12px rgba(243, 146, 0, 0.3) !important;
-        width: 100% !important;
-        padding: 0.75rem !important;
-    }}
-    [data-testid="stFileUploadDropzone"] {{
-        background-color: {COR_FUNDO_CARD} !important;
-        border: 2px dashed {COR_LARANJA} !important;
-        border-radius: 12px !important;
-        padding: 25px !important;
-    }}
-    .stProgress > div > div > div > div {{
-        background-color: {COR_LARANJA} !important;
-    }}
-    .badge-admin {{
-        background-color: {COR_LARANJA};
-        color: #000000;
-        font-size: 11px;
-        font-weight: bold;
-        padding: 3px 8px;
+    /* Fundo geral escuro */
+    .stApp {
+        background-color: #1c1c1e;
+        color: #ffffff;
+    }
+    
+    /* Container do Cabeçalho */
+    .header-card {
+        background-color: #2c2c2e;
         border-radius: 12px;
-        margin-left: 5px;
-    }}
+        padding: 30px;
+        text-align: center;
+        margin-bottom: 25px;
+        border: 1px solid #3a3a3c;
+    }
+    .header-title {
+        font-size: 32px;
+        font-weight: 700;
+        color: #ffffff;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+    }
+    .header-subtitle {
+        color: #a1a1a6;
+        font-size: 14px;
+        margin-top: 10px;
+    }
+    
+    /* Container dos Formulários */
+    .form-card {
+        background-color: #2c2c2e;
+        border-radius: 12px;
+        padding: 25px;
+        border: 1px solid #3a3a3c;
+    }
+    
+    /* Inputs customizados */
+    div[data-baseweb="input"] {
+        background-color: #1c1c1e !important;
+        border-color: #3a3a3c !important;
+        border-radius: 8px !important;
+        color: #ffffff !important;
+    }
+    
+    /* Botões */
+    .stButton > button {
+        width: 100%;
+        background-color: #141c2b;
+        color: #ffffff;
+        border: 1px solid #2c3a4e;
+        border-radius: 8px;
+        padding: 10px 16px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    .stButton > button:hover {
+        background-color: #1e2c44;
+        border-color: #40587c;
+        color: #ffffff;
+    }
     </style>
+""", unsafe_allow_html=True)
 
-    <script>
-    const removerElementos = () => {{
-        const elementos = parent.document.querySelectorAll('[data-testid="stStatusWidget"], .viewerBadge_container__1QSob, a[href*="streamlit.io"]');
-        elementos.forEach(el => el.remove());
-    }};
-    setInterval(removerElementos, 1000);
-    </script>
-""",
-    unsafe_allow_html=True,
-)
-
-# --- GERENCIAMENTO DE USUÁRIOS E CONFIGURAÇÕES ---
 ARQUIVO_USUARIOS = "usuarios.json"
-ARQUIVO_CONFIG = "config_smtp.json"
+ARQUIVO_SMTP = "config_smtp.json"
+MODELO_YOLO_PATH = "best.pt"
 
+if os.name == 'nt':
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-def carregar_config_smtp():
-    if os.path.exists(ARQUIVO_CONFIG):
+# ==============================================================================
+# FUNÇÕES DE PERSISTÊNCIA & HELPER
+# ==============================================================================
+def gerar_hash_senha(senha):
+    return hashlib.sha256(senha.encode('utf-8')).hexdigest()
+
+def carregar_json(caminho, padrao):
+    if os.path.exists(caminho):
         try:
-            with open(ARQUIVO_CONFIG, "r") as f:
+            with open(caminho, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
-            pass
-    return {
-        "servidor": "smtp.gmail.com",
-        "porta": 587,
-        "email_remetente": "",
-        "senha_app": "",
-        "url_sistema": "http://localhost:8501",
-    }
+            return padrao
+    return padrao
 
-
-def salvar_config_smtp(config):
-    with open(ARQUIVO_CONFIG, "w") as f:
-        json.dump(config, f, indent=4)
-
-
-def enviar_notificacao_email(assunto, mensagem_html, email_destino):
-    cfg = carregar_config_smtp()
-    remetente = cfg.get("email_remetente")
-    senha = cfg.get("senha_app")
-
-    if not remetente or not senha:
-        return False, "Configuração de SMTP ausente (Remetente ou Senha)."
-
-    try:
-        msg = MIMEMultipart()
-        msg["From"] = remetente
-        msg["To"] = email_destino
-        msg["Subject"] = assunto
-        msg.attach(MIMEText(mensagem_html, "html"))
-
-        server = smtplib.SMTP(
-            cfg.get("servidor", "smtp.gmail.com"), int(cfg.get("porta", 587))
-        )
-        server.ehlo()
-        server.starttls()
-        server.login(remetente, senha)
-        server.sendmail(remetente, email_destino, msg.as_string())
-        server.quit()
-        return True, "E-mail enviado com sucesso!"
-    except smtplib.SMTPAuthenticationError:
-        return False, (
-            "Erro de Autenticação: Verifique se usou a 'Senha de App' de 16"
-            " dígitos."
-        )
-    except Exception as e:
-        return False, f"Erro ao enviar e-mail: {str(e)}"
-
-
-def resetar_e_carregar_usuarios():
-    dados_padrao = {
-        USUARIO_ADMIN: {
-            "senha": "admin123",
-            "email": "diego2007costa@gmail.com",
-            "status": "aprovado",
-            "role": "admin",
-        },
-        "operador": {
-            "senha": "recorte2026",
-            "email": "operador@empresa.com",
-            "status": "aprovado",
-            "role": "user",
-        },
-    }
-    with open(ARQUIVO_USUARIOS, "w") as f:
-        json.dump(dados_padrao, f, indent=4)
-    return dados_padrao
-
+def salvar_json(caminho, dados):
+    with open(caminho, "w", encoding="utf-8") as f:
+        json.dump(dados, f, indent=4, ensure_ascii=False)
 
 def carregar_usuarios():
-    if not os.path.exists(ARQUIVO_USUARIOS):
-        return resetar_e_carregar_usuarios()
-    try:
-        with open(ARQUIVO_USUARIOS, "r") as f:
-            return json.load(f)
-    except Exception:
-        return resetar_e_carregar_usuarios()
-
-
-def salvar_usuarios_dict(usuarios):
-    with open(ARQUIVO_USUARIOS, "w") as f:
-        json.dump(usuarios, f, indent=4)
-
-
-def solicitar_novo_cadastro(usuario, email, senha):
-    usuarios = carregar_usuarios()
-    usuario_key = usuario.strip().lower()
-    email_limpo = email.strip().lower()
-
-    usuarios[usuario_key] = {
-        "senha": senha,
-        "email": email_limpo,
-        "status": "pendente",
-        "role": "user",
+    padrao = {
+        "admin@empresa.com.br": {
+            "nome": "Administrador",
+            "senha": gerar_hash_senha("admin123"),
+            "cargo": "Administrador",
+            "status": "ativo",
+            "email_verificado": True
+        }
     }
-    salvar_usuarios_dict(usuarios)
+    return carregar_json(ARQUIVO_USUARIOS, padrao)
 
-    cfg = carregar_config_smtp()
-    url_sistema = cfg.get("url_sistema", "http://localhost:8501")
+def salvar_usuarios(usuarios):
+    salvar_json(ARQUIVO_USUARIOS, usuarios)
 
-    email_admin = usuarios.get(USUARIO_ADMIN, {}).get("email", "")
-    if email_admin:
-        corpo_admin = f"""
-        <!DOCTYPE html>
-        <html>
-        <head><meta charset="utf-8"></head>
-        <body style="margin: 0; padding: 0; background-color: #2A2927; font-family: 'Segoe UI', Arial, sans-serif;">
-            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 30px auto; background-color: #333230; border-radius: 12px; border: 1px solid #444340; overflow: hidden;">
-                <tr>
-                    <td align="center" style="padding: 25px; background-color: #222120; border-bottom: 3px solid #F39200;">
-                        <h1 style="color: #F39200; font-size: 28px; font-weight: 900; margin: 0;">LOGO</h1>
-                        <p style="color: #aaaaaa; font-size: 12px; margin: 5px 0 0 0; text-transform: uppercase;">Painel do Administrador</p>
-                    </td>
-                </tr>
-                <tr>
-                    <td style="padding: 30px; color: #FFFFFF;">
-                        <h2 style="color: #FFFFFF; font-size: 20px; margin-top: 0;">⏳ Nova Solicitação de Cadastro</h2>
-                        <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Um novo usuário solicitou acesso ao sistema:</p>
-                        <div style="background-color: #2A2927; padding: 15px; border-radius: 8px; border: 1px solid #444340; margin: 15px 0;">
-                            <p style="margin: 5px 0; color: #dddddd; font-size: 14px;"><strong>Usuário:</strong> <span style="color: #F39200;">{usuario_key}</span></p>
-                            <p style="margin: 5px 0; color: #dddddd; font-size: 14px;"><strong>E-mail:</strong> <span style="color: #F39200;">{email_limpo}</span></p>
-                        </div>
-                        <p style="color: #dddddd; font-size: 14px;">Acesse o painel para aprovar ou recusar este cadastro.</p>
-                        <div style="text-align: center; margin-top: 25px;">
-                            <a href="{url_sistema}" target="_blank" style="background-color: #F39200; color: #FFFFFF; text-decoration: none; padding: 12px 25px; border-radius: 6px; font-weight: bold; font-size: 14px; display: inline-block;">Acessar Painel Admin</a>
-                        </div>
-                    </td>
-                </tr>
-            </table>
-        </body>
-        </html>
-        """
-        enviar_notificacao_email(
-            f"[Sistema Recorte] Novo Cadastro Pendente: {usuario_key}",
-            corpo_admin,
-            email_admin,
-        )
+def carregar_config_smtp():
+    return carregar_json(ARQUIVO_SMTP, {
+        "servidor": "", "porta": 587, "usuario": "", "senha": "", "usar_tls": True
+    })
 
+def gerar_codigo_verificacao():
+    return ''.join(random.choices(string.digits, k=6))
 
-def alterar_status_usuario(usuario, novo_status):
-    usuarios = carregar_usuarios()
-    if usuario in usuarios:
-        email_destino = (
-            usuarios[usuario].get("email")
-            if isinstance(usuarios[usuario], dict)
-            else None
-        )
+def enviar_email_smtp(destino, assunto, corpo_html):
+    config = carregar_config_smtp()
+    if not config.get("servidor") or not config.get("usuario"):
+        return False, "Configurações de SMTP não foram preenchidas no painel Admin."
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = config["usuario"]
+        msg['To'] = destino
+        msg['Subject'] = assunto
+        msg.attach(MIMEText(corpo_html, 'html'))
+        
+        server = smtplib.SMTP(config["servidor"], int(config["porta"]))
+        if config.get("usar_tls", True):
+            server.starttls()
+        server.login(config["usuario"], config["senha"])
+        server.sendmail(config["usuario"], destino, msg.as_string())
+        server.quit()
+        return True, "Enviado"
+    except Exception as e:
+        return False, str(e)
 
-        if novo_status == "excluir":
-            del usuarios[usuario]
-        else:
-            usuarios[usuario]["status"] = novo_status
-
-        salvar_usuarios_dict(usuarios)
-
-        cfg = carregar_config_smtp()
-        url_sistema = cfg.get("url_sistema", "http://localhost:8501")
-
-        if novo_status == "aprovado" and email_destino:
-            assunto = "🎉 Seu acesso ao Sistema de Recorte foi Aprovado!"
-            corpo_aprovacao = f"""
-            <!DOCTYPE html>
-            <html>
-            <head><meta charset="utf-8"></head>
-            <body style="margin: 0; padding: 0; background-color: #2A2927; font-family: 'Segoe UI', Arial, sans-serif;">
-                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 30px auto; background-color: #333230; border-radius: 12px; border: 1px solid #444340; overflow: hidden;">
-                    <tr>
-                        <td align="center" style="padding: 25px; background-color: #222120; border-bottom: 3px solid #F39200;">
-                            <h1 style="color: #F39200; font-size: 28px; font-weight: 900; margin: 0;">LOGO</h1>
-                            <p style="color: #aaaaaa; font-size: 12px; margin: 5px 0 0 0; text-transform: uppercase;">Sistema de Recorte de Etiquetas</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td style="padding: 30px; color: #FFFFFF;">
-                            <h2 style="color: #FFFFFF; font-size: 20px; margin-top: 0;">🎉 Cadastro Aprovado!</h2>
-                            <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Olá, <strong>{usuario}</strong>!</p>
-                            <p style="color: #dddddd; font-size: 14px; line-height: 1.5;">Sua conta foi <strong>aprovada pelo administrador</strong>. Clique no botão abaixo para acessar a plataforma:</p>
-                            <div style="text-align: center; margin: 30px 0;">
-                                <a href="{url_sistema}" target="_blank" style="background-color: #F39200; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">🚀 Acessar Sistema de Recorte</a>
-                            </div>
-                        </td>
-                    </tr>
-                </table>
-            </body>
-            </html>
-            """
-            enviar_notificacao_email(assunto, corpo_aprovacao, email_destino)
-
-
-def alterar_senha_usuario(usuario, nova_senha):
-    usuarios = carregar_usuarios()
-    if usuario in usuarios:
-        usuarios[usuario]["senha"] = nova_senha
-        salvar_usuarios_dict(usuarios)
-
-
-# ESTADO DA SESSÃO
-if "autenticado" not in st.session_state:
-    st.session_state.autenticado = False
-if "usuario_logado" not in st.session_state:
-    st.session_state.usuario_logado = ""
-if "dir_temp" not in st.session_state:
-    st.session_state.dir_temp = None
-
-# --- TELA DE LOGIN, ESQUECI A SENHA & CADASTRO ---
-if not st.session_state.autenticado:
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 1.8, 1])
-
-    with col2:
-        st.markdown(
-            f"""
-            <div style="background-color: {COR_FUNDO_CARD}; padding: 25px; border-radius: 12px; border: 1px solid #444340; text-align: center;">
-                <h2 style="color: {COR_LARANJA}; margin-bottom: 5px;">✂️ Sistema de Recorte</h2>
-                <p style="color: #aaaaaa; font-size: 14px; margin:0;">Acesse com sua conta, recupere seu acesso ou crie um novo cadastro</p>
-            </div>
-        """,
-            unsafe_allow_html=True,
-        )
-
-        tab_login, tab_esqueci, tab_cadastro = st.tabs(
-            ["🔑 Entrar", "🔒 Esqueci a Senha", "📝 Criar Conta"]
-        )
-        usuarios_cadastrados = carregar_usuarios()
-
-        with tab_login:
-            with st.form("form_login"):
-                usuario_input = st.text_input("Usuário").strip().lower()
-                senha_input = st.text_input("Senha", type="password")
-                btn_entrar = st.form_submit_button(
-                    "Acessar Plataforma", use_container_width=True
-                )
-
-                if btn_entrar:
-                    if usuario_input in usuarios_cadastrados:
-                        dados_usr = usuarios_cadastrados[usuario_input]
-                        senha_cadastrada = (
-                            dados_usr["senha"]
-                            if isinstance(dados_usr, dict)
-                            else dados_usr
-                        )
-                        status_cadastrado = (
-                            dados_usr.get("status", "aprovado")
-                            if isinstance(dados_usr, dict)
-                            else "aprovado"
-                        )
-
-                        if senha_cadastrada == senha_input:
-                            if status_cadastrado == "aprovado":
-                                st.session_state.autenticado = True
-                                st.session_state.usuario_logado = usuario_input
-                                st.success("Login realizado!")
-                                st.rerun()
-                            else:
-                                st.warning(
-                                    "⏳ Sua conta ainda está aguardando aprovação do"
-                                    " administrador."
-                                )
-                        else:
-                            st.error("Usuário ou senha incorretos.")
-                    else:
-                        st.error("Usuário ou senha incorretos.")
-
-        with tab_esqueci:
-            with st.form("form_esqueci_senha"):
-                email_recuperacao = st.text_input("Digite seu E-mail").strip().lower()
-                nova_senha_rec = st.text_input("Nova Senha", type="password")
-                confirma_nova_senha = st.text_input(
-                    "Confirme a Nova Senha", type="password"
-                )
-                btn_recuperar = st.form_submit_button(
-                    "Redefinir Senha", use_container_width=True
-                )
-
-                if btn_recuperar:
-                    if (
-                        not email_recuperacao
-                        or not nova_senha_rec
-                        or not confirma_nova_senha
-                    ):
-                        st.warning("Preencha todos os campos.")
-                    elif nova_senha_rec != confirma_nova_senha:
-                        st.error("As novas senhas não coincidem.")
-                    else:
-                        usuario_encontrado = None
-                        for usr, dados in usuarios_cadastrados.items():
-                            if (
-                                isinstance(dados, dict)
-                                and dados.get("email", "").lower() == email_recuperacao
-                            ):
-                                usuario_encontrado = usr
-                                break
-
-                        if usuario_encontrado:
-                            alterar_senha_usuario(usuario_encontrado, nova_senha_rec)
-                            st.success(
-                                f"✅ Senha do usuário '{usuario_encontrado}' atualizada com"
-                                " sucesso!"
-                            )
-                        else:
-                            st.error("Nenhuma conta encontrada com este e-mail.")
-
-        with tab_cadastro:
-            with st.form("form_cadastro"):
-                novo_usuario = st.text_input("Escolha um Nome de Usuário").strip().lower()
-                novo_email = st.text_input("Seu E-mail").strip().lower()
-                nova_senha = st.text_input("Escolha uma Senha", type="password")
-                confirma_senha = st.text_input("Confirme a Senha", type="password")
-                btn_cadastrar = st.form_submit_button(
-                    "Solicitar Cadastro", use_container_width=True
-                )
-
-                if btn_cadastrar:
-                    if not novo_usuario or not novo_email or not nova_senha:
-                        st.warning("Preencha todos os campos.")
-                    elif "@" not in novo_email or "." not in novo_email:
-                        st.error("Digite um e-mail válido.")
-                    elif novo_usuario in usuarios_cadastrados:
-                        st.error("Este nome de usuário já existe.")
-                    elif nova_senha != confirma_senha:
-                        st.error("As senhas não coincidem.")
-                    else:
-                        solicitar_novo_cadastro(novo_usuario, novo_email, nova_senha)
-                        st.success(
-                            "✅ Solicitação enviada! O administrador foi notificado."
-                        )
-
-    st.stop()
-
-# --- SISTEMA PRINCIPAL ---
-usuarios_db = carregar_usuarios()
-dados_logado = usuarios_db.get(st.session_state.usuario_logado, {})
-e_admin = (st.session_state.usuario_logado == USUARIO_ADMIN) or (
-    isinstance(dados_logado, dict) and dados_logado.get("role") == "admin"
-)
-
-# --- BARRA LATERAL ---
-with st.sidebar:
-    if e_admin:
-        st.markdown(
-            f"👤 **Usuário:** `{st.session_state.usuario_logado}` <span"
-            " class='badge-admin'>👑 ADMIN</span>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(f"👤 **Usuário:** `{st.session_state.usuario_logado}`")
-
-    st.markdown("---")
-    if st.button("🚪 Sair da Conta", use_container_width=True):
-        st.session_state.autenticado = False
-        st.session_state.usuario_logado = ""
-        st.rerun()
-
-
-def renderizar_texto_logo():
-    return f"""
-    <div style="display: flex; justify-content: center; align-items: center; padding: 10px;">
-        <h1 style="
-            color: {COR_LARANJA} !important;
-            font-size: 38px;
-            font-weight: 900;
-            letter-spacing: 3px;
-            margin: 0;
-            text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.8);
-        ">LOGO</h1>
+def enviar_codigo_email(email_destino, codigo):
+    assunto = "Código de Verificação - Sistema de Recorte"
+    corpo = f"""
+    <div style="font-family: Arial, sans-serif; background-color: #2c2c2e; color: #ffffff; padding: 20px; border-radius: 8px;">
+        <h2 style="color: #ff6600;">Código de Verificação</h2>
+        <p>Seu código para validar o e-mail no Sistema de Recorte é:</p>
+        <div style="background-color: #1c1c1e; font-size: 32px; font-weight: bold; color: #ff6600; padding: 15px; text-align: center; letter-spacing: 8px; border-radius: 8px; width: 200px;">
+            {codigo}
+        </div>
+        <p style="margin-top: 20px; font-size: 12px; color: #a1a1a6;">Insira este código na tela para submeter seu cadastro ao Administrador.</p>
     </div>
     """
+    return enviar_email_smtp(email_destino, assunto, corpo)
 
+# ==============================================================================
+# VISÃO COMPUTACIONAL
+# ==============================================================================
+@st.cache_resource
+def carregar_modelo_yolo():
+    if YOLO_DISPONIVEL and os.path.exists(MODELO_YOLO_PATH):
+        try:
+            return YOLO(MODELO_YOLO_PATH)
+        except Exception:
+            return None
+    return None
 
-col_header_logo, col_header_text = st.columns([1.2, 4])
-
-with col_header_logo:
-    st.markdown(renderizar_texto_logo(), unsafe_allow_html=True)
-
-with col_header_text:
-    st.markdown(
-        """
-        <div style="padding-top: 5px;">
-            <h1 style="margin:0; font-size: 32px;">Recorte de Etiquetas</h1>
-            <p style="margin: 6px 0 0 0; color: #bbbbbb !important; font-size: 15px;">
-                Envie as fotos das etiquetas para processamento e recorte automático em lote.
-            </p>
-        </div>
-    """,
-        unsafe_allow_html=True,
-    )
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-# --- CRIAÇÃO DAS ABAS ---
-if e_admin:
-    tab_ferramenta, tab_admin = st.tabs(
-        ["✂️ Ferramenta de Recorte", "👑 Painel do Administrador"]
-    )
-else:
-    (tab_ferramenta,) = st.tabs(["✂️ Ferramenta de Recorte"])
-    tab_admin = None
-
-# ==========================================
-# ABA 1: FERRAMENTA DE RECORTE (PRINCIPAL)
-# ==========================================
-with tab_ferramenta:
-    if platform.system() == "Windows":
-        caminho_tesseract = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-        if os.path.exists(caminho_tesseract):
-            pytesseract.pytesseract.tesseract_cmd = caminho_tesseract
-        else:
-            st.error(
-                "⚠️ Tesseract OCR não encontrado em C:\\Program"
-                " Files\\Tesseract-OCR."
-            )
+def processar_etiqueta(imagem_bytes):
+    image_np = np.frombuffer(imagem_bytes, np.uint8)
+    img = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
+    modelo = carregar_modelo_yolo()
+    recortes = []
+    
+    if modelo:
+        resultados = modelo(img)
+        for r in resultados:
+            for box in r.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                crop = img[y1:y2, x1:x2]
+                crop_gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+                texto = pytesseract.image_to_string(crop_gray, lang='por+eng').strip()
+                recortes.append({
+                    "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
+                    "texto": texto if texto else "Nenhum texto detectado"
+                })
     else:
-        pytesseract.pytesseract.tesseract_cmd = "tesseract"
+        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        texto = pytesseract.image_to_string(img_gray, lang='por+eng').strip()
+        recortes.append({
+            "imagem": cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
+            "texto": texto if texto else "Sem modelo YOLO"
+        })
+    return recortes
 
-    @st.cache_resource
-    def carregar_modelo():
-        if not os.path.exists("best.pt"):
-            st.error("⚠️ O arquivo 'best.pt' não foi encontrado.")
-            st.stop()
-        return YOLO("best.pt")
+# ==============================================================================
+# CONTROLE DE SESSÃO
+# ==============================================================================
+if "usuario_logado" not in st.session_state:
+    st.session_state.usuario_logado = None
+if "etapa_cadastro" not in st.session_state:
+    st.session_state.etapa_cadastro = "formulario"
+if "email_em_verificacao" not in st.session_state:
+    st.session_state.email_em_verificacao = None
 
-    try:
-        model = carregar_modelo()
-    except Exception as e:
-        st.error(f"Erro ao carregar o modelo YOLO: {e}")
-        st.stop()
-
-    TERMOS_CHAVE = ["claro", "embratel", "sgp", "ctrl", "patrimonio", "propriedade"]
-
-    if "fila_recortes" not in st.session_state:
-        st.session_state.fila_recortes = {}
-
-    col_upload, col_stats = st.columns([2.0, 1.0])
-
-    with col_upload:
-        arquivos_enviados = st.file_uploader(
-            "📂 Selecione ou arraste o lote de fotos aqui",
-            type=["jpg", "jpeg", "png"],
-            accept_multiple_files=True,
-        )
-
-    with col_stats:
-        st.markdown("##### 📊 Painel do Lote")
-        tot_enviadas = len(arquivos_enviados) if arquivos_enviados else 0
-        tot_prontas = len(st.session_state.fila_recortes)
-
-        st.markdown(
-            f"""
-            <div class="metric-card" style="margin-bottom: 10px;">
-                <div class="metric-value">{tot_enviadas}</div>
-                <div class="metric-label">FOTOS CARREGADAS</div>
+# ==============================================================================
+# INTERFACE DE AUTENTICAÇÃO (O DESIGN DA FOTO)
+# ==============================================================================
+def renderizar_autenticacao():
+    # Banner Topo (Card do Titulo da foto)
+    st.markdown("""
+        <div class="header-card">
+            <div class="header-title">
+                <span style="color: #ff4a5a; font-size: 38px;">✂️</span> Sistema de Recorte
             </div>
-            <div class="metric-card">
-                <div class="metric-value">{tot_prontas}</div>
-                <div class="metric-label">RECORTES PRONTOS</div>
+            <div class="header-subtitle">
+                Acesse com sua conta, recupere seu acesso ou crie um novo cadastro
             </div>
-        """,
-            unsafe_allow_html=True,
-        )
+        </div>
+    """, unsafe_allow_html=True)
 
-    if arquivos_enviados:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button(
-            "🚀 INICIAR PROCESSAMENTO DAS FOTOS", use_container_width=True
-        ):
-            st.session_state.fila_recortes = {}
-            dir_temp = tempfile.mkdtemp()
-            st.session_state.dir_temp = dir_temp
-
-            barra_progresso = st.progress(0)
-            status_texto = st.empty()
-            total_fotos = len(arquivos_enviados)
-
-            for idx, arquivo in enumerate(arquivos_enviados):
-                nome_arquivo = arquivo.name
-                status_texto.write(
-                    f"🔍 Analisando imagem ({idx+1}/{total_fotos}):"
-                    f" **{nome_arquivo}**"
-                )
-
-                file_bytes = np.asarray(bytearray(arquivo.read()), dtype=np.uint8)
-                img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-                del file_bytes
-
-                if img is None:
-                    continue
-                h_img, w_img, _ = img.shape
-
-                resultados = model(img, conf=0.35, verbose=False)
-                candidatas = []
-
-                for r in resultados:
-                    for box in r.boxes:
-                        x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
-                        candidatas.append({
-                            "coords": (x1, y1, x2, y2),
-                            "altura": y2 - y1,
-                            "texto_valido": False,
-                        })
-
-                if not candidatas:
-                    del img
-                    gc.collect()
-                    continue
-
-                etiqueta_escolhida = candidatas[0]
-
-                if etiqueta_escolhida is not None:
-                    x1, y1, x2, y2 = etiqueta_escolhida["coords"]
-                    y1, y2 = max(0, y1 - 10), min(h_img, y2 + 10)
-                    x1, x2 = max(0, x1 - 10), min(w_img, x2 + 10)
-                    recorte = img[y1:y2, x1:x2]
-
-                    _, buffer = cv2.imencode(".png", recorte)
-                    caminho_recorte = os.path.join(
-                        dir_temp, f"recorte_{nome_arquivo}.png"
-                    )
-                    with open(caminho_recorte, "wb") as f:
-                        f.write(buffer.tobytes())
-
-                    st.session_state.fila_recortes[nome_arquivo] = caminho_recorte
-
-                del img
-                gc.collect()
-                barra_progresso.progress((idx + 1) / total_fotos)
-
-            status_texto.success("✅ Processamento concluído!")
-
-    if st.session_state.fila_recortes and st.session_state.dir_temp:
-        st.markdown("---")
-        st.markdown("### 📥 Recortes Prontos")
-
-        caminho_zip_final = os.path.join(
-            st.session_state.dir_temp, "etiquetas_recortadas.zip"
-        )
-        with zipfile.ZipFile(caminho_zip_final, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            for nome, caminho_arquivo in st.session_state.fila_recortes.items():
-                nome_recorte = f"recorte_{nome}"
-                if os.path.exists(caminho_arquivo):
-                    zip_file.write(caminho_arquivo, arcname=nome_recorte)
-
-        col_down, _ = st.columns([1, 2])
-        with col_down:
-            with open(caminho_zip_final, "rb") as f:
-                st.download_button(
-                    label="📦 BAIXAR TODOS OS RECORTES (.ZIP)",
-                    data=f,
-                    file_name="etiquetas_recortadas.zip",
-                    mime="application/zip",
-                    use_container_width=True,
-                )
-
-        cols = st.columns(4)
-        for i, (nome, caminho_arquivo) in enumerate(
-            st.session_state.fila_recortes.items()
-        ):
-            with cols[i % 4]:
-                if os.path.exists(caminho_arquivo):
-                    st.image(caminho_arquivo, caption=nome, use_container_width=True)
-
-# ==========================================
-# ABA 2: PAINEL DO ADMINISTRADOR
-# ==========================================
-if e_admin and tab_admin is not None:
-    with tab_admin:
-        st.markdown("## 👑 Painel do Administrador")
-        st.write("Gerencie aprovações de contas, permissões de usuários e configurações de e-mail.")
-
-        tab_adm_users, tab_adm_smtp = st.tabs(
-            ["👥 Gerenciar Usuários", "✉️ Configuração de E-mail (SMTP)"]
-        )
-
-        # TAB 1: USUÁRIOS
-        with tab_adm_users:
-            all_users = carregar_usuarios()
-
-            st.markdown("### ⏳ Solicitações Pendentes de Aprovação")
-            pendentes = {
-                u: d
-                for u, d in all_users.items()
-                if isinstance(d, dict) and d.get("status") == "pendente"
-            }
-
-            if pendentes:
-                for usr, d in pendentes.items():
-                    col_u1, col_u2, col_u3, col_u4 = st.columns([2, 3, 1, 1])
-                    with col_u1:
-                        st.write(f"**Usuário:** `{usr}`")
-                    with col_u2:
-                        st.write(f"**E-mail:** {d.get('email')}")
-                    with col_u3:
-                        if st.button("✅ Aprovar", key=f"aprov_{usr}"):
-                            alterar_status_usuario(usr, "aprovado")
-                            st.success(f"Usuário '{usr}' aprovado!")
-                            st.rerun()
-                    with col_u4:
-                        if st.button("❌ Recusar", key=f"recus_{usr}"):
-                            alterar_status_usuario(usr, "excluir")
-                            st.info(f"Usuário '{usr}' recusado.")
-                            st.rerun()
-                    st.markdown("---")
-            else:
-                st.info("Nenhuma solicitação de cadastro pendente.")
-
-            # --- TABELA DE USUÁRIOS CADASTRADOS (OPÇÃO 1 INTEGRADA) ---
-            st.markdown("<br>### 👥 Usuários Cadastrados no Sistema", unsafe_allow_html=True)
-
-            aprovados = {
-                u: d for u, d in all_users.items() 
-                if not isinstance(d, dict) or d.get("status") == "aprovado"
-            }
-
-            if aprovados:
-                dados_tabela = []
-                for usr, d in aprovados.items():
-                    email_usr = d.get("email", "N/A") if isinstance(d, dict) else "N/A"
-                    role_usr = d.get("role", "user") if isinstance(d, dict) else "user"
-                    status_usr = d.get("status", "aprovado") if isinstance(d, dict) else "aprovado"
-                    
-                    dados_tabela.append({
-                        "Usuário": usr,
-                        "E-mail": email_usr,
-                        "Perfil": "👑 Admin" if role_usr == "admin" else "👤 Operador",
-                        "Status": "🟢 Ativo" if status_usr == "aprovado" else "🟡 Pendente"
-                    })
+    # Abas com os ícones exatamente como no print
+    aba_login, aba_esqueci, aba_cadastro = st.tabs([
+        "🔑 Entrar", 
+        "🔒 Esqueci a Senha", 
+        "📝 Criar Conta"
+    ])
+    
+    # --- ABA 1: ENTRAR ---
+    with aba_login:
+        with st.form("form_login"):
+            usuario = st.text_input("Usuário (E-mail)").strip().lower()
+            senha = st.text_input("Senha", type="password")
+            btn_entrar = st.form_submit_button("Acessar Plataforma")
+            
+            if btn_entrar:
+                usuarios = carregar_usuarios()
+                senha_h = gerar_hash_senha(senha)
                 
-                st.dataframe(
-                    dados_tabela, 
-                    use_container_width=True, 
-                    hide_index=True
-                )
+                if usuario in usuarios:
+                    u = usuarios[usuario]
+                    if u["senha"] == senha_h:
+                        if u.get("status") == "ativo":
+                            st.session_state.usuario_logado = {
+                                "email": usuario, "nome": u["nome"], "cargo": u["cargo"]
+                            }
+                            st.success(f"Bem-vindo(a), {u['nome']}!")
+                            st.rerun()
+                        elif u.get("status") == "pendente_email":
+                            st.warning("E-mail não verificado. Por favor, solicite o cadastro novamente para validar.")
+                        elif u.get("status") == "pendente_aprovação_admin":
+                            st.info("E-mail verificado! Aguardando aprovação do Administrador.")
+                    else:
+                        st.error("Senha incorreta.")
+                else:
+                    st.error("Usuário não encontrado.")
+
+    # --- ABA 2: ESQUECI A SENHA ---
+    with aba_esqueci:
+        with st.form("form_esqueci"):
+            email_rec = st.text_input("Digite o e-mail cadastrado").strip().lower()
+            btn_recuperar = st.form_submit_button("Recuperar Acesso")
+            
+            if btn_recuperar:
+                usuarios = carregar_usuarios()
+                if email_rec in usuarios:
+                    st.info("Instruções de recuperação foram enviadas para o seu e-mail.")
+                else:
+                    st.error("E-mail não encontrado.")
+
+    # --- ABA 3: CRIAR CONTA (COM CÓDIGO DE VERIFICAÇÃO INTEGRADO) ---
+    with aba_cadastro:
+        if st.session_state.etapa_cadastro == "formulario":
+            with st.form("form_criar"):
+                nome = st.text_input("Nome Completo")
+                email = st.text_input("E-mail Corporativo").strip().lower()
+                senha = st.text_input("Crie uma Senha", type="password")
+                cargo = st.selectbox("Cargo Solicitado", ["Operador", "Administrador"])
+                btn_cadastrar = st.form_submit_button("Enviar e Enviar Código")
                 
-                # --- NOVO RECURSO: ALTERAR PERMISSÕES DE USUÁRIOS (IDEIA 3) ---
-                with st.expander("⚡ Alterar Permissões (Promover / Rebaixar)"):
-                    usuarios_alteraveis = [u for u in aprovados.keys() if u != USUARIO_ADMIN]
-                    
-                    if usuarios_alteraveis:
-                        col_usr_perm, col_role_perm, col_btn_perm = st.columns([2, 2, 1])
-                        with col_usr_perm:
-                            usr_perm_sel = st.selectbox("Selecione o Usuário:", usuarios_alteraveis, key="sel_usr_perm")
-                        
-                        role_atual = aprovados[usr_perm_sel].get("role", "user") if isinstance(aprovados[usr_perm_sel], dict) else "user"
-                        
-                        with col_role_perm:
-                            nova_role = st.selectbox(
-                                "Novo Perfil:", 
-                                ["user", "admin"], 
-                                index=1 if role_atual == "admin" else 0,
-                                format_func=lambda x: "👑 Admin" if x == "admin" else "👤 Operador",
-                                key="sel_role_perm"
-                            )
-                        with col_btn_perm:
-                            st.write("<br>", unsafe_allow_html=True)
-                            if st.button("💾 Salvar Perfil", use_container_width=True):
-                                if isinstance(all_users[usr_perm_sel], dict):
-                                    all_users[usr_perm_sel]["role"] = nova_role
-                                else:
-                                    all_users[usr_perm_sel] = {
-                                        "senha": all_users[usr_perm_sel],
-                                        "email": "N/A",
-                                        "status": "aprovado",
-                                        "role": nova_role
-                                    }
-                                salvar_usuarios_dict(all_users)
-                                st.success(f"Perfil de '{usr_perm_sel}' alterado com sucesso!")
-                                st.rerun()
+                if btn_cadastrar:
+                    usuarios = carregar_usuarios()
+                    if not nome or not email or not senha:
+                        st.warning("Preencha todos os campos obrigatórios.")
+                    elif email in usuarios and usuarios[email].get("status") == "ativo":
+                        st.error("E-mail já cadastrado e ativo.")
                     else:
-                        st.info("Nenhum outro usuário disponível para alterar permissões no momento.")
+                        codigo = gerar_codigo_verificacao()
+                        usuarios[email] = {
+                            "nome": nome,
+                            "senha": gerar_hash_senha(senha),
+                            "cargo": cargo,
+                            "status": "pendente_email",
+                            "codigo_verificacao": codigo,
+                            "email_verificado": False
+                        }
+                        salvar_usuarios(usuarios)
+                        
+                        ok, msg = enviar_codigo_email(email, codigo)
+                        if ok:
+                            st.session_state.email_em_verificacao = email
+                            st.session_state.etapa_cadastro = "validar_codigo"
+                            st.success("Código enviado para o seu e-mail! Insira-o no próximo passo.")
+                            st.rerun()
+                        else:
+                            st.error(f"Erro ao enviar o e-mail: {msg}")
 
-                # GERENCIADOR DE EXCLUSÃO DE CONTAS
-                with st.expander("🛠️ Ações e Gerenciamento de Contas"):
-                    usuarios_para_excluir = [
-                        u for u in aprovados.keys() 
-                        if u != USUARIO_ADMIN and u != st.session_state.usuario_logado
-                    ]
+        elif st.session_state.etapa_cadastro == "validar_codigo":
+            email_atual = st.session_state.email_em_verificacao
+            st.info(f"Insira o código de 6 dígitos enviado para **{email_atual}**:")
+            
+            with st.form("form_codigo"):
+                codigo_in = st.text_input("Código de 6 Dígitos", max_chars=6).strip()
+                btn_valida = st.form_submit_button("Confirmar Código")
+                
+                if btn_valida:
+                    usuarios = carregar_usuarios()
+                    u_dados = usuarios.get(email_atual, {})
                     
-                    if usuarios_para_excluir:
-                        col_sel, col_btn = st.columns([3, 1])
-                        with col_sel:
-                            usr_selecionado = st.selectbox("Selecione um usuário para remover:", usuarios_para_excluir)
-                        with col_btn:
-                            st.write("<br>", unsafe_allow_html=True)
-                            if st.button("🗑️ Excluir Usuário", use_container_width=True):
-                                alterar_status_usuario(usr_selecionado, "excluir")
-                                st.warning(f"Usuário '{usr_selecionado}' removido.")
-                                st.rerun()
+                    if codigo_in == u_dados.get("codigo_verificacao"):
+                        usuarios[email_atual]["email_verificado"] = True
+                        usuarios[email_atual]["status"] = "pendente_aprovação_admin"
+                        usuarios[email_atual]["codigo_verificacao"] = None
+                        salvar_usuarios(usuarios)
+                        
+                        st.success("✅ E-mail confirmado! Sua conta foi enviada para validação do Administrador.")
+                        st.session_state.etapa_cadastro = "formulario"
+                        st.session_state.email_em_verificacao = None
                     else:
-                        st.info("Nenhum outro usuário disponível para remoção no momento.")
+                        st.error("Código inválido. Tente novamente.")
+            
+            if st.button("⬅️ Voltar / Reenviar"):
+                st.session_state.etapa_cadastro = "formulario"
+                st.session_state.email_em_verificacao = None
+                st.rerun()
+
+# ==============================================================================
+# PAINÉIS OPERADOR & ADMIN
+# ==============================================================================
+def renderizar_painel_operador():
+    st.title("✂️ Processamento de Etiquetas")
+    st.write(f"Usuário: **{st.session_state.usuario_logado['nome']}**")
+    
+    up = st.file_uploader("Carregar imagem da etiqueta", type=["jpg", "png", "jpeg"])
+    if up:
+        bytes_img = up.getvalue()
+        c1, c2 = st.columns(2)
+        with c1:
+            st.image(bytes_img, use_container_width=True)
+        with c2:
+            res = processar_etiqueta(bytes_img)
+            for i, r in enumerate(res):
+                st.image(r["imagem"], caption=f"Recorte #{i+1}")
+                st.text_area(f"Texto #{i+1}", r["texto"])
+
+def renderizar_painel_admin():
+    st.title("⚙️ Gerenciamento do Sistema")
+    t1, t2 = st.tabs(["Aprovação de Usuários", "Configuração SMTP"])
+    
+    with t1:
+        usuarios = carregar_usuarios()
+        pendentes = {
+            e: d for e, d in usuarios.items() 
+            if d.get("status") == "pendente_aprovação_admin" and d.get("email_verificado") == True
+        }
+        
+        if not pendentes:
+            st.info("Nenhuma conta pendente de aprovação.")
+        else:
+            for email, d in pendentes.items():
+                st.write(f"**Nome:** {d['nome']} | **E-mail:** {email} | **Cargo:** {d['cargo']}")
+                col1, col2 = st.columns(6)
+                if col1.button("Aprovar", key=f"ap_{email}"):
+                    usuarios[email]["status"] = "ativo"
+                    salvar_usuarios(usuarios)
+                    st.success(f"{email} aprovado!")
+                    st.rerun()
+                if col2.button("Rejeitar", key=f"rej_{email}"):
+                    del usuarios[email]
+                    salvar_usuarios(usuarios)
+                    st.warning("Solicitação removida.")
+                    st.rerun()
+                    
+    with t2:
+        cfg = carregar_config_smtp()
+        with st.form("f_smtp"):
+            srv = st.text_input("Servidor SMTP", value=cfg.get("servidor", ""))
+            prt = st.number_input("Porta", value=int(cfg.get("porta", 587)))
+            usr = st.text_input("Usuário Remetente", value=cfg.get("usuario", ""))
+            pwd = st.text_input("Senha Remetente", value=cfg.get("senha", ""), type="password")
+            tls = st.checkbox("Usar TLS", value=cfg.get("usar_tls", True))
+            
+            if st.form_submit_button("Salvar Configurações"):
+                salvar_json(ARQUIVO_SMTP, {"servidor": srv, "porta": prt, "usuario": usr, "senha": pwd, "usar_tls": tls})
+                st.success("Configurações salvas!")
+
+# ==============================================================================
+# ROUTER PRINCIPAL
+# ==============================================================================
+def main():
+    if not st.session_state.usuario_logado:
+        renderizar_autenticacao()
+    else:
+        st.sidebar.title("Menu")
+        st.sidebar.write(f"👤 {st.session_state.usuario_logado['nome']}")
+        
+        cargo = st.session_state.usuario_logado["cargo"]
+        if cargo == "Administrador":
+            opt = st.sidebar.radio("Navegar", ["Operador", "Admin"])
+            if opt == "Operador":
+                renderizar_painel_operador()
             else:
-                st.info("Nenhum usuário cadastrado.")
+                renderizar_painel_admin()
+        else:
+            renderizar_painel_operador()
+            
+        if st.sidebar.button("Sair"):
+            st.session_state.usuario_logado = None
+            st.rerun()
 
-        # TAB 2: CONFIGURAÇÃO SMTP
-        with tab_adm_smtp:
-            st.markdown("### ⚙️ Servidor para envio de e-mails")
-            cfg_atual = carregar_config_smtp()
-
-            with st.form("form_smtp"):
-                srv = st.text_input("Servidor SMTP", value=cfg_atual.get("servidor", "smtp.gmail.com"))
-                porta = st.number_input("Porta", value=int(cfg_atual.get("porta", 587)))
-                remetente = st.text_input("E-mail Remetente", value=cfg_atual.get("email_remetente", ""))
-                senha_app = st.text_input("Senha de App (16 dígitos)", value=cfg_atual.get("senha_app", ""), type="password")
-                url_sys = st.text_input("URL do Sistema (Link dos e-mails)", value=cfg_atual.get("url_sistema", "http://localhost:8501"))
-
-                if st.form_submit_button("💾 Salvar Configurações"):
-                    nova_cfg = {
-                        "servidor": srv,
-                        "porta": porta,
-                        "email_remetente": remetente,
-                        "senha_app": senha_app,
-                        "url_sistema": url_sys,
-                    }
-                    salvar_config_smtp(nova_cfg)
-                    st.success("Configurações de e-mail salvas com sucesso!")
+if __name__ == "__main__":
+    main()
