@@ -83,6 +83,15 @@ st.markdown("""
         color: #ffffff;
     }
     
+    .candidate-card {
+        background-color: #2c2c2e;
+        border: 2px solid #3a3a3c;
+        border-radius: 10px;
+        padding: 10px;
+        text-align: center;
+        margin-bottom: 10px;
+    }
+    
     .footer-text {
         text-align: center;
         color: #8e8e93;
@@ -96,16 +105,13 @@ st.markdown("""
 
 ARQUIVO_USUARIOS = "usuarios.json"
 ARQUIVO_SMTP = "config_smtp.json"
-MODELO_YOLO_PATH = "best.pt"
-
-# Link da sua aplicação hospedada no Streamlit Cloud
 URL_APLICACAO = "https://recorteetiquetas.streamlit.app/"
 
 if os.name == 'nt':
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 # ==============================================================================
-# FUNÇÕES DE PERSISTÊNCIA & HELPER
+# FUNÇÕES HELPER & SMTP
 # ==============================================================================
 def gerar_hash_senha(senha):
     return hashlib.sha256(senha.encode('utf-8')).hexdigest()
@@ -175,7 +181,6 @@ def enviar_codigo_email(email_destino, codigo):
         <div style="background-color: #1c1c1e; font-size: 32px; font-weight: bold; color: #ff9500; padding: 15px; text-align: center; letter-spacing: 8px; border-radius: 8px; width: 200px;">
             {codigo}
         </div>
-        <p style="margin-top: 20px; font-size: 12px; color: #a1a1a6;">Insira este código na tela para submeter seu cadastro ao Administrador.</p>
     </div>
     """
     return enviar_email_smtp(email_destino, assunto, corpo)
@@ -194,7 +199,6 @@ def enviar_notificacao_aprovacao(email_destino, nome_usuario):
                     🚀 Acessar Sistema de Etiquetas
                 </a>
             </p>
-            <p style="font-size: 12px; color: #a1a1a6;">Link direto: <a href="{URL_APLICACAO}" style="color: #ff9500;">{URL_APLICACAO}</a></p>
         </div>
     </body>
     </html>
@@ -209,18 +213,22 @@ def converter_imagem_para_bytes(img_rgb):
     return None
 
 # ==============================================================================
-# DETECTOR EXCLUSIVO E SEGURO DE ETIQUETAS (EMBRATEL/PATRIMÔNIO)
+# ALGORITMO AVANÇADO DE DETECÇÃO DE ETIQUETA COM SELEÇÃO INTELIGENTE
 # ==============================================================================
-def recortar_somente_etiquetas_validas(imagem_bytes):
+def extrair_candidatos_etiqueta(imagem_bytes):
+    """
+    Identifica regiões candidatas a etiquetas com código de barras.
+    Retorna uma lista de recortes ordenados por relevância.
+    """
     image_np = np.frombuffer(imagem_bytes, np.uint8)
     img_bgr = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
     if img_bgr is None:
         return []
 
     h_orig, w_orig = img_bgr.shape[:2]
-    recortes_encontrados = []
+    candidatos = []
 
-    # 1. Tenta usar o Detector de Código de Barras do OpenCV de forma segura (compatível com Linux/Windows)
+    # Método A: Detector de Código de Barras do OpenCV (Seguro)
     try:
         detector = None
         if hasattr(cv2, 'barcode') and hasattr(cv2.barcode, 'BarcodeDetector'):
@@ -236,54 +244,53 @@ def recortar_somente_etiquetas_validas(imagem_bytes):
                     x_min, y_min = np.min(pts, axis=0)
                     x_max, y_max = np.max(pts, axis=0)
                     
-                    pad_w = int((x_max - x_min) * 0.25)
-                    pad_h = int((y_max - y_min) * 1.40)
+                    # Expansão calculada para pegar a etiqueta inteira (texto + código)
+                    pad_w = int((x_max - x_min) * 0.30)
+                    pad_h = int((y_max - y_min) * 1.50)
                     
-                    x1 = max(0, x_min - pad_w)
-                    y1 = max(0, y_min - pad_h)
-                    x2 = min(w_orig, x_max + pad_w)
-                    y2 = min(h_orig, y_max + pad_h)
+                    x1, y1 = max(0, x_min - pad_w), max(0, y_min - pad_h)
+                    x2, y2 = min(w_orig, x_max + pad_w), min(h_orig, y_max + pad_h)
                     
                     crop = img_bgr[y1:y2, x1:x2]
                     if crop.size > 0:
-                        recortes_encontrados.append({
+                        candidatos.append({
                             "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
-                            "box": (x1, y1, x2, y2)
+                            "confianca": "alta"
                         })
     except Exception:
         pass
 
-    # 2. Análise Morfológica Restrita a Etiquetas Retangulares (Padrão Embratel)
-    if not recortes_encontrados:
-        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 7))
-        grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
-        _, thresh = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    # Método B: Análise Morfológica em Grayscale (Formato da Etiqueta Embratel)
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 5))
+    grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
+    _, thresh = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    for cnt in contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        aspect_ratio = float(w) / max(h, 1)
+        area = w * h
         
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        for cnt in contours:
-            x, y, w, h = cv2.boundingRect(cnt)
-            aspect_ratio = float(w) / max(h, 1)
-            area = w * h
+        # Filtro de etiqueta retangular alongada
+        if aspect_ratio >= 1.8 and area > (w_orig * h_orig * 0.005):
+            x1, y1 = max(0, x - 12), max(0, y - 12)
+            x2, y2 = min(w_orig, x + w + 12), min(h_orig, y + h + 12)
             
-            if aspect_ratio >= 1.9 and area > (w_orig * h_orig * 0.006):
-                x1, y1 = max(0, x - 10), max(0, y - 10)
-                x2, y2 = min(w_orig, x + w + 10), min(h_orig, y + h + 10)
-                
-                crop = img_bgr[y1:y2, x1:x2]
-                if crop.size > 0:
-                    recortes_encontrados.append({
-                        "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
-                        "box": (x1, y1, x2, y2)
-                    })
+            crop = img_bgr[y1:y2, x1:x2]
+            if crop.size > 0:
+                # Evita duplicados visuais
+                candidatos.append({
+                    "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
+                    "confianca": "media"
+                })
 
-    # Retorna SOMENTE recortes validados (sem imagens inteiras como fallback)
-    return recortes_encontrados
+    return candidatos
 
 # ==============================================================================
-# CONTROLE DE SESSÃO E LOGIN
+# AUTENTICAÇÃO
 # ==============================================================================
 if "usuario_logado" not in st.session_state:
     st.session_state.usuario_logado = None
@@ -291,6 +298,8 @@ if "etapa_cadastro" not in st.session_state:
     st.session_state.etapa_cadastro = "formulario"
 if "email_em_verificacao" not in st.session_state:
     st.session_state.email_em_verificacao = None
+if "selecoes_usuario" not in st.session_state:
+    st.session_state.selecoes_usuario = {}
 
 def renderizar_autenticacao():
     col_v1, col_center, col_v2 = st.columns([1, 2, 1])
@@ -302,11 +311,7 @@ def renderizar_autenticacao():
             </div>
         """, unsafe_allow_html=True)
 
-        aba_login, aba_esqueci, aba_cadastro = st.tabs([
-            "🔑 Entrar", 
-            "🔒 Esqueci a Senha", 
-            "📝 Criar Conta"
-        ])
+        aba_login, aba_esqueci, aba_cadastro = st.tabs(["🔑 Entrar", "🔒 Esqueci a Senha", "📝 Criar Conta"])
         
         with aba_login:
             with st.form("form_login"):
@@ -320,33 +325,13 @@ def renderizar_autenticacao():
                     
                     if usuario in usuarios:
                         u = usuarios[usuario]
-                        if u["senha"] == senha_h:
-                            if u.get("status") == "ativo":
-                                st.session_state.usuario_logado = {
-                                    "email": usuario, "nome": u["nome"], "cargo": u["cargo"]
-                                }
-                                st.success(f"Bem-vindo(a), {u['nome']}!")
-                                st.rerun()
-                            elif u.get("status") == "pendente_email":
-                                st.warning("E-mail não verificado. Refaça o cadastro para validar.")
-                            elif u.get("status") == "pendente_aprovação_admin":
-                                st.info("E-mail verificado! Aguardando aprovação do Administrador.")
+                        if u["senha"] == senha_h and u.get("status") == "ativo":
+                            st.session_state.usuario_logado = {"email": usuario, "nome": u["nome"], "cargo": u["cargo"]}
+                            st.rerun()
                         else:
-                            st.error("Senha incorreta.")
+                            st.error("Credenciais inválidas ou cadastro pendente de aprovação.")
                     else:
                         st.error("Usuário não encontrado.")
-
-        with aba_esqueci:
-            with st.form("form_esqueci"):
-                email_rec = st.text_input("Digite o e-mail cadastrado").strip().lower()
-                btn_recuperar = st.form_submit_button("Recuperar Acesso")
-                
-                if btn_recuperar:
-                    usuarios = carregar_usuarios()
-                    if email_rec in usuarios:
-                        st.info("Instruções de recuperação foram enviadas para o seu e-mail.")
-                    else:
-                        st.error("E-mail não encontrado.")
 
         with aba_cadastro:
             if st.session_state.etapa_cadastro == "formulario":
@@ -358,69 +343,40 @@ def renderizar_autenticacao():
                     
                     if btn_cadastrar:
                         usuarios = carregar_usuarios()
-                        if not nome or not email or not senha:
-                            st.warning("Preencha todos os campos obrigatórios.")
-                        elif email in usuarios and usuarios[email].get("status") == "ativo":
-                            st.error("E-mail já cadastrado e ativo.")
-                        else:
-                            codigo = gerar_codigo_verificacao()
-                            usuarios[email] = {
-                                "nome": nome,
-                                "senha": gerar_hash_senha(senha),
-                                "cargo": "Operador",
-                                "status": "pendente_email",
-                                "codigo_verificacao": codigo,
-                                "email_verificado": False
-                            }
-                            salvar_usuarios(usuarios)
-                            
-                            ok, msg = enviar_codigo_email(email, codigo)
-                            if ok:
-                                st.session_state.email_em_verificacao = email
-                                st.session_state.etapa_cadastro = "validar_codigo"
-                                st.success("Código enviado para o seu e-mail!")
-                                st.rerun()
-                            else:
-                                st.error(f"Erro ao enviar o e-mail: {msg}")
+                        codigo = gerar_codigo_verificacao()
+                        usuarios[email] = {
+                            "nome": nome, "senha": gerar_hash_senha(senha), "cargo": "Operador",
+                            "status": "pendente_email", "codigo_verificacao": codigo, "email_verificado": False
+                        }
+                        salvar_usuarios(usuarios)
+                        ok, msg = enviar_codigo_email(email, codigo)
+                        if ok:
+                            st.session_state.email_em_verificacao = email
+                            st.session_state.etapa_cadastro = "validar_codigo"
+                            st.rerun()
 
             elif st.session_state.etapa_cadastro == "validar_codigo":
-                email_atual = st.session_state.email_em_verificacao
-                st.info(f"Insira o código de 6 dígitos enviado para **{email_atual}**:")
-                
                 with st.form("form_codigo"):
                     codigo_in = st.text_input("Código de 6 Dígitos", max_chars=6).strip()
-                    btn_valida = st.form_submit_button("Confirmar Código")
-                    
-                    if btn_valida:
+                    if st.form_submit_button("Confirmar Código"):
                         usuarios = carregar_usuarios()
-                        u_dados = usuarios.get(email_atual, {})
-                        
-                        if codigo_in == u_dados.get("codigo_verificacao"):
+                        email_atual = st.session_state.email_em_verificacao
+                        if codigo_in == usuarios.get(email_atual, {}).get("codigo_verificacao"):
                             usuarios[email_atual]["email_verificado"] = True
                             usuarios[email_atual]["status"] = "pendente_aprovação_admin"
-                            usuarios[email_atual]["codigo_verificacao"] = None
                             salvar_usuarios(usuarios)
-                            
-                            st.success("✅ E-mail confirmado! Aguardando aprovação do Administrador.")
+                            st.success("✅ E-mail verificado! Aguarde a aprovação do Admin.")
                             st.session_state.etapa_cadastro = "formulario"
-                            st.session_state.email_em_verificacao = None
-                        else:
-                            st.error("Código inválido. Tente novamente.")
-                
-                if st.button("⬅️ Voltar / Reenviar"):
-                    st.session_state.etapa_cadastro = "formulario"
-                    st.session_state.email_em_verificacao = None
-                    st.rerun()
+                            st.rerun()
 
 # ==============================================================================
-# TELA DE RECORTE E DOWNLOAD (.ZIP EXCLUSIVO)
+# FERRAMENTA DE RECORTE COM LAYOUT DISTRIBUÍDO E MODO DE DÚVIDA
 # ==============================================================================
 def renderizar_ferramenta_recorte():
     col_upload, col_painel = st.columns([2.2, 1])
     
     total_fotos = 0
-    total_recortes = 0
-    todos_recortes_bytes = []
+    recortes_finais = []
     
     with col_upload:
         arquivos = st.file_uploader(
@@ -432,37 +388,47 @@ def renderizar_ferramenta_recorte():
         if arquivos:
             total_fotos = len(arquivos)
             st.write("---")
+            
             for idx, arq in enumerate(arquivos):
                 bytes_img = arq.getvalue()
-                recortes = recortar_somente_etiquetas_validas(bytes_img)
+                candidatos = extrair_candidatos_etiqueta(bytes_img)
                 
-                st.markdown(f"### 📷 Foto #{idx+1}: `{arq.name}`")
-                c_original, c_recortes = st.columns([1, 1])
+                st.markdown(f"#### 📷 Imagem #{idx+1}: `{arq.name}`")
                 
-                with c_original:
-                    st.image(bytes_img, use_container_width=True, caption="Foto Enviada")
+                if not candidatos:
+                    st.warning("⚠️ Nenhuma etiqueta detectada automaticamente nesta imagem.")
                 
-                with c_recortes:
-                    if not recortes:
-                        st.warning("⚠️ Nenhuma etiqueta no padrão com código de barras encontrada nesta foto.")
-                    else:
-                        st.markdown("##### ✂️ Etiquetas Recortadas:")
-                        for i, r in enumerate(recortes):
-                            total_recortes += 1
-                            st.image(r["imagem"], use_container_width=True, caption=f"Etiqueta Validade #{total_recortes}")
+                elif len(candidatos) == 1 and candidatos[0]["confianca"] == "alta":
+                    # Recorte perfeito direto (sem necessidade de intervenção)
+                    img_recortada = candidatos[0]["imagem"]
+                    st.image(img_recortada, width=350, caption="Etiqueta Recortada com Precisão")
+                    recortes_finais.append((f"etiqueta_{idx+1}.png", converter_imagem_para_bytes(img_recortada)))
+                
+                else:
+                    # MODO DE DÚVIDA / MÚLTIPLAS OPÇÕES (LAYOUT SIMPLES E BEM DISTRIBUÍDO)
+                    st.info("🤔 **Identificamos mais de uma opção.** Escolha a etiqueta correta abaixo:")
+                    
+                    # Distribuição horizontal limpa em colunas
+                    cols = st.columns(min(len(candidatos), 3))
+                    
+                    for c_idx, cand in enumerate(candidatos[:3]):
+                        with cols[c_idx]:
+                            st.image(cand["imagem"], use_container_width=True)
+                            chave_btn = f"sel_{idx}_{c_idx}"
                             
-                            img_bytes = converter_imagem_para_bytes(r["imagem"])
-                            if img_bytes:
-                                nome_etiqueta = f"etiqueta_{total_recortes}.png"
-                                todos_recortes_bytes.append((nome_etiqueta, img_bytes))
-                                
-                                st.download_button(
-                                    label=f"⬇️ Baixar Etiqueta #{total_recortes} (.PNG)",
-                                    data=img_bytes,
-                                    file_name=nome_etiqueta,
-                                    mime="image/png",
-                                    key=f"dl_{idx}_{i}"
-                                )
+                            is_selected = st.session_state.selecoes_usuario.get(idx) == c_idx
+                            
+                            if st.button(f"{'✅ Selecionada' if is_selected else 'Escolher Esta'}", key=chave_btn):
+                                st.session_state.selecoes_usuario[idx] = c_idx
+                                st.rerun()
+                    
+                    # Adiciona a selecionada pelo usuário caso tenha escolhido
+                    opcao_escolhida = st.session_state.selecoes_usuario.get(idx)
+                    if opcao_escolhida is not None and opcao_escolhida < len(candidatos):
+                        img_sel = candidatos[opcao_escolhida]["imagem"]
+                        recortes_finais.append((f"etiqueta_{idx+1}_opcao_{opcao_escolhida+1}.png", converter_imagem_para_bytes(img_sel)))
+                
+                st.write("---")
 
     with col_painel:
         st.markdown("### 📊 Painel do Lote")
@@ -473,23 +439,23 @@ def renderizar_ferramenta_recorte():
                 <div class="stat-label">Fotos Processadas</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">{total_recortes}</div>
-                <div class="stat-label">Etiquetas Válidas Recortadas</div>
+                <div class="stat-number">{len(recortes_finais)}</div>
+                <div class="stat-label">Etiquetas Confirmadas</div>
             </div>
         """, unsafe_allow_html=True)
 
-        if todos_recortes_bytes:
+        if recortes_finais:
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for nome_arq, dados_bytes in todos_recortes_bytes:
-                    zip_file.writestr(nome_arq, dados_bytes)
+                for nome_arq, dados_bytes in recortes_finais:
+                    if dados_bytes:
+                        zip_file.writestr(nome_arq, dados_bytes)
             
-            st.write("---")
-            st.markdown("#### 📦 Download em Lote")
+            st.markdown("#### 📦 Download Final")
             st.download_button(
-                label=f"⬇️ BAIXAR {total_recortes} ETIQUETAS (.ZIP)",
+                label=f"⬇️ BAIXAR {len(recortes_finais)} ETIQUETAS (.ZIP)",
                 data=zip_buffer.getvalue(),
-                file_name="etiquetas_filtradas.zip",
+                file_name="etiquetas_recortadas.zip",
                 mime="application/zip",
                 key="btn_download_zip_lote"
             )
@@ -502,78 +468,25 @@ def renderizar_painel_admin():
     t1, t2, t3 = st.tabs(["Aprovação de Usuários", "👥 Gerenciar Usuários", "Configuração SMTP"])
     
     with t1:
-        c_top1, c_top2 = st.columns([3, 1])
-        with c_top1:
-            st.markdown("#### Solicitações de Acesso")
-        with c_top2:
-            if st.button("🔄 Atualizar Lista"):
-                st.rerun()
-
         usuarios = carregar_usuarios()
-        pendentes = {
-            e: d for e, d in usuarios.items() 
-            if d.get("status") == "pendente_aprovação_admin" and d.get("email_verificado") == True
-        }
+        pendentes = {e: d for e, d in usuarios.items() if d.get("status") == "pendente_aprovação_admin"}
         
         if not pendentes:
             st.info("Nenhuma conta pendente de aprovação no momento.")
         else:
             for email, d in pendentes.items():
                 st.write(f"**Nome:** {d['nome']} | **E-mail:** {email}")
-                novo_cargo = st.selectbox(f"Definir Cargo para {d['nome']}", ["Operador", "Administrador"], key=f"cargo_{email}")
-                
-                col1, col2, _ = st.columns([1, 1, 4])
-                if col1.button("Aprovar", key=f"ap_{email}"):
-                    usuarios[email]["cargo"] = novo_cargo
+                if st.button("Aprovar Acesso", key=f"ap_{email}"):
                     usuarios[email]["status"] = "ativo"
                     salvar_usuarios(usuarios)
-                    
-                    ok_envio, msg_envio = enviar_notificacao_aprovacao(email, d['nome'])
-                    
-                    if ok_envio:
-                        st.success(f"✅ {email} aprovado! E-mail com o link de acesso enviado.")
-                    else:
-                        st.warning(f"✅ {email} aprovado, mas o envio do e-mail falhou: {msg_envio}")
-                        
-                    st.rerun()
-
-                if col2.button("Rejeitar", key=f"rej_{email}"):
-                    del usuarios[email]
-                    salvar_usuarios(usuarios)
-                    st.warning("Solicitação removida.")
+                    enviar_notificacao_aprovacao(email, d['nome'])
+                    st.success(f"Acesso aprovado para {email}!")
                     st.rerun()
 
     with t2:
-        st.markdown("#### Usuários Cadastrados no Sistema")
         usuarios = carregar_usuarios()
-        
-        if usuarios:
-            dados_tabela = []
-            for email, u in usuarios.items():
-                dados_tabela.append({
-                    "Nome": u.get("nome", "-"),
-                    "E-mail": email,
-                    "Cargo": u.get("cargo", "-"),
-                    "Status": u.get("status", "-")
-                })
-            
-            st.dataframe(dados_tabela, use_container_width=True)
-            st.write("---")
-            
-            st.markdown("#### 🗑️ Remover Usuário")
-            lista_emails = [e for e in usuarios.keys() if e != "admin@empresa.com.br"]
-            
-            if not lista_emails:
-                st.caption("Não há outros usuários cadastrados além do Admin Principal.")
-            else:
-                usuario_para_remover = st.selectbox("Selecione o e-mail para remover:", lista_emails)
-                
-                col_btn, _ = st.columns([1, 3])
-                if col_btn.button("❌ Excluir Usuário Selecionado", type="secondary"):
-                    del usuarios[usuario_para_remover]
-                    salvar_usuarios(usuarios)
-                    st.success(f"Usuário {usuario_para_remover} removido com sucesso!")
-                    st.rerun()
+        dados_tabela = [{"Nome": u.get("nome"), "E-mail": e, "Cargo": u.get("cargo"), "Status": u.get("status")} for e, u in usuarios.items()]
+        st.dataframe(dados_tabela, use_container_width=True)
 
     with t3:
         cfg = carregar_config_smtp()
@@ -589,7 +502,7 @@ def renderizar_painel_admin():
                 st.success("Configurações salvas!")
 
 # ==============================================================================
-# ROUTER PRINCIPAL
+# MAIN
 # ==============================================================================
 def main():
     if not st.session_state.usuario_logado:
@@ -601,13 +514,10 @@ def main():
         with c_head2:
             st.markdown("""
                 <h1 style='font-size: 32px; margin: 0;'>Recorte de Etiquetas</h1>
-                <p style='color: #a1a1a6; margin-top: 5px;'>Identificador e extrator exclusivo de etiquetas padrão Embratel.</p>
+                <p style='color: #a1a1a6; margin-top: 5px;'>Identificador e extrator inteligente de etiquetas.</p>
             """, unsafe_allow_html=True)
 
-        st.write("")
-        
         cargo = st.session_state.usuario_logado["cargo"]
-        
         if cargo == "Administrador":
             tab_recorte, tab_admin = st.tabs(["✂️ Ferramenta de Recorte", "👑 Painel do Administrador"])
             with tab_recorte:
@@ -617,8 +527,7 @@ def main():
         else:
             renderizar_ferramenta_recorte()
 
-        st.write("")
-        if st.button("🚪 Sair do Sistema", key="btn_logout_top"):
+        if st.button("🚪 Sair do Sistema"):
             st.session_state.usuario_logado = None
             st.rerun()
 
