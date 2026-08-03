@@ -47,7 +47,7 @@ st.markdown("""
         color: #ffffff !important;
     }
     
-    /* Cards de Estatísticas (Painel do Lote) */
+    /* Cards de Estatísticas */
     .stat-card {
         background-color: #2c2c2e;
         border: 1px solid #3a3a3c;
@@ -102,7 +102,8 @@ st.markdown("""
 ARQUIVO_USUARIOS = "usuarios.json"
 ARQUIVO_SMTP = "config_smtp.json"
 MODELO_YOLO_PATH = "best.pt"
-# URL da sua aplicação implantada no Streamlit Cloud ou servidor
+
+# ⚠️ ALTERE PARA A URL EXATA DO SEU APP NO STREAMLIT CLOUD
 URL_APLICACAO = "https://recorteetiquetastcia.streamlit.app" 
 
 if os.name == 'nt':
@@ -129,7 +130,6 @@ def salvar_json(caminho, dados):
 
 def carregar_usuarios():
     usuarios = carregar_json(ARQUIVO_USUARIOS, {})
-    # Força a existência do admin master com hash correto da senha 'admin123'
     usuarios["admin@empresa.com.br"] = {
         "nome": "Administrador",
         "senha": gerar_hash_senha("admin123"),
@@ -203,7 +203,7 @@ def enviar_notificacao_aprovacao(email_destino, nome_usuario):
     return enviar_email_smtp(email_destino, assunto, corpo)
 
 # ==============================================================================
-# VISÃO COMPUTACIONAL
+# VISÃO COMPUTACIONAL & RECORTE DE ETIQUETAS
 # ==============================================================================
 @st.cache_resource
 def carregar_modelo_yolo():
@@ -215,8 +215,14 @@ def carregar_modelo_yolo():
     return None
 
 def processar_etiqueta(imagem_bytes):
+    """
+    Decodifica a imagem e realiza o RECORTE exato das etiquetas detectadas pelo YOLO.
+    Caso não exista o modelo YOLO, realiza a detecção por contornos (OpenCV Fallback).
+    """
     image_np = np.frombuffer(imagem_bytes, np.uint8)
     img = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
+    h_orig, w_orig = img.shape[:2]
+    
     modelo = carregar_modelo_yolo()
     recortes = []
     
@@ -224,21 +230,45 @@ def processar_etiqueta(imagem_bytes):
         resultados = modelo(img)
         for r in resultados:
             for box in r.boxes:
+                # Coordenadas do recorte (Bounding Box)
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
+                
+                # Garante que os limites fiquem dentro das dimensões da imagem
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(w_orig, x2), min(h_orig, y2)
+                
+                # RECORTE (Crop da imagem)
                 crop = img[y1:y2, x1:x2]
-                crop_gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-                texto = pytesseract.image_to_string(crop_gray, lang='por+eng').strip()
-                recortes.append({
-                    "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
-                    "texto": texto if texto else "Nenhum texto detectado"
-                })
+                
+                if crop.size > 0:
+                    crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                    recortes.append({
+                        "imagem": crop_rgb,
+                        "box": (x1, y1, x2, y2)
+                    })
     else:
-        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        texto = pytesseract.image_to_string(img_gray, lang='por+eng').strip()
-        recortes.append({
-            "imagem": cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
-            "texto": texto if texto else "Sem modelo YOLO"
-        })
+        # Fallback OpenCV: Recorte automatizado por detecção de contornos
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            # Filtra ruidos pequenos
+            if w > 50 and h > 50:
+                crop = img[y:y+h, x:x+w]
+                crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                recortes.append({
+                    "imagem": crop_rgb,
+                    "box": (x, y, x+w, y+h)
+                })
+                
+    # Se nada for detectado, mantém a imagem original como segurança
+    if not recortes:
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        recortes.append({"imagem": img_rgb, "box": (0, 0, w_orig, h_orig)})
+
     return recortes
 
 # ==============================================================================
@@ -375,7 +405,7 @@ def renderizar_autenticacao():
                     st.rerun()
 
 # ==============================================================================
-# PAINEL DE OPERAÇÃO / DASHBOARD
+# PAINEL DE FERRAMENTA DE RECORTE (EXIBIÇÃO DOS RECORTES GERADOS)
 # ==============================================================================
 def renderizar_ferramenta_recorte():
     col_upload, col_painel = st.columns([2.2, 1])
@@ -395,17 +425,19 @@ def renderizar_ferramenta_recorte():
             st.write("---")
             for idx, arq in enumerate(arquivos):
                 bytes_img = arq.getvalue()
-                res = processar_etiqueta(bytes_img)
-                total_recortes += len(res)
+                recortes = processar_etiqueta(bytes_img)
+                total_recortes += len(recortes)
                 
-                st.markdown(f"### 📷 Foto #{idx+1}: {arq.name}")
-                c_original, c_recortes = st.columns(2)
+                st.markdown(f"### 📷 Foto #{idx+1}: `{arq.name}`")
+                c_original, c_recortes = st.columns([1, 1])
+                
                 with c_original:
-                    st.image(bytes_img, use_container_width=True, caption="Original")
+                    st.image(bytes_img, use_container_width=True, caption="Imagem Original")
+                
                 with c_recortes:
-                    for i, r in enumerate(res):
-                        st.image(r["imagem"], caption=f"Recorte #{i+1}")
-                        st.text_area(f"Texto #{i+1}", r["texto"], key=f"txt_{idx}_{i}")
+                    st.markdown("##### ✂️ Recortes Detectados:")
+                    for i, r in enumerate(recortes):
+                        st.image(r["imagem"], use_container_width=True, caption=f"Recorte #{i+1} - Box: {r['box']}")
 
     with col_painel:
         st.markdown("### 📊 Painel do Lote")
@@ -422,22 +454,21 @@ def renderizar_ferramenta_recorte():
         """, unsafe_allow_html=True)
 
 # ==============================================================================
-# PAINEL DO ADMINISTRADOR (ATUALIZAÇÃO EM TEMPO REAL + NOTIFICAÇÃO VIA EMAIL)
+# PAINEL DO ADMINISTRADOR
 # ==============================================================================
 def renderizar_painel_admin():
     st.markdown("### ⚙️ Painel do Administrador")
     t1, t2, t3 = st.tabs(["Aprovação de Usuários", "👥 Gerenciar Usuários", "Configuração SMTP"])
     
-    # --- ABA 1: APROVAÇÃO ---
+    # --- ABA 1: APROVAÇÃO DE USUÁRIOS ---
     with t1:
         c_top1, c_top2 = st.columns([3, 1])
         with c_top1:
             st.markdown("#### Solicitações de Acesso")
         with c_top2:
-            if st.button("🔄 Atualizar Lista de Pendentes"):
+            if st.button("🔄 Atualizar Lista"):
                 st.rerun()
 
-        # Lê os dados em disco em tempo real
         usuarios = carregar_usuarios()
         pendentes = {
             e: d for e, d in usuarios.items() 
@@ -457,13 +488,12 @@ def renderizar_painel_admin():
                     usuarios[email]["status"] = "ativo"
                     salvar_usuarios(usuarios)
                     
-                    # Envio do E-mail notificando o usuário com o link do site
                     ok_envio, msg_envio = enviar_notificacao_aprovacao(email, d['nome'])
                     
                     if ok_envio:
-                        st.success(f"✅ {email} aprovado como {novo_cargo}! E-mail com link enviado com sucesso.")
+                        st.success(f"✅ {email} aprovado! E-mail com o link de acesso enviado.")
                     else:
-                        st.warning(f"✅ {email} aprovado, mas falhou o envio do e-mail: {msg_envio}")
+                        st.warning(f"✅ {email} aprovado, mas o envio do e-mail falhou: {msg_envio}")
                         
                     st.rerun()
 
@@ -551,7 +581,7 @@ def main():
         else:
             renderizar_ferramenta_recorte()
 
-        # Botão discreto para deslogar
+        # Botão para deslogar
         st.write("")
         if st.button("🚪 Sair do Sistema", key="btn_logout_top"):
             st.session_state.usuario_logado = None
