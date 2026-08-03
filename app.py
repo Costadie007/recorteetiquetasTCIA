@@ -222,7 +222,7 @@ def converter_imagem_para_bytes(img_rgb):
     return None
 
 # ==============================================================================
-# ALGORITMO COM INTELIGÊNCIA ARTIFICIAL YOLO (best.pt)
+# ALGORITMO IA (YOLOV8 - MODO AUTÔNOMO PARA GRANDES LOTES)
 # ==============================================================================
 def extrair_candidatos_etiqueta(imagem_bytes):
     image_np = np.frombuffer(imagem_bytes, np.uint8)
@@ -237,30 +237,36 @@ def extrair_candidatos_etiqueta(imagem_bytes):
     
     # 1. PROCESSAMENTO VIA MODELO TREINADO (best.pt)
     if modelo is not None:
-        resultados = modelo(img_bgr, verbose=False)
+        # iou=0.5 agrupa caixas duplicadas na mesma etiqueta
+        resultados = modelo(img_bgr, conf=0.25, iou=0.5, verbose=False)
+        
+        deteccoes = []
         for r in resultados:
             for box in r.boxes:
                 conf = float(box.conf[0])
-                if conf > 0.30: # Threshold de detecção flexível
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    
-                    # Leve margem ao redor para evitar cortar o contorno da etiqueta
-                    pad_w = int((x2 - x1) * 0.03)
-                    pad_h = int((y2 - y1) * 0.03)
-                    
-                    crop_x1 = max(0, x1 - pad_w)
-                    crop_y1 = max(0, y1 - pad_h)
-                    crop_x2 = min(w_orig, x2 + pad_w)
-                    crop_y2 = min(h_orig, y2 + pad_h)
-                    
-                    crop = img_bgr[crop_y1:crop_y2, crop_x1:crop_x2]
-                    if crop.size > 0:
-                        candidatos.append({
-                            "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
-                            "confianca": "alta" if conf > 0.55 else "media"
-                        })
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                deteccoes.append((conf, x1, y1, x2, y2))
+        
+        # Ordena para garantir que a opção de maior confiança fique no topo (posição 0)
+        deteccoes.sort(key=lambda item: item[0], reverse=True)
+        
+        for conf, x1, y1, x2, y2 in deteccoes:
+            pad_w = int((x2 - x1) * 0.04)
+            pad_h = int((y2 - y1) * 0.04)
+            
+            crop_x1 = max(0, x1 - pad_w)
+            crop_y1 = max(0, y1 - pad_h)
+            crop_x2 = min(w_orig, x2 + pad_w)
+            crop_y2 = min(h_orig, y2 + pad_h)
+            
+            crop = img_bgr[crop_y1:crop_y2, crop_x1:crop_x2]
+            if crop.size > 0:
+                candidatos.append({
+                    "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
+                    "confianca": conf
+                })
 
-    # 2. FALLBACK SECUNDÁRIO CASO NÃO IDENTIFIQUE PELO BEST.PT
+    # 2. FALLBACK SECUNDÁRIO OPENCV (Se o best.pt não achar nada)
     if not candidatos:
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
         clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
@@ -286,7 +292,7 @@ def extrair_candidatos_etiqueta(imagem_bytes):
                 if crop.size > 0:
                     candidatos.append({
                         "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
-                        "confianca": "media"
+                        "confianca": 0.5
                     })
 
     return candidatos
@@ -300,8 +306,8 @@ if "etapa_cadastro" not in st.session_state:
     st.session_state.etapa_cadastro = "formulario"
 if "email_em_verificacao" not in st.session_state:
     st.session_state.email_em_verificacao = None
-if "selecoes_usuario" not in st.session_state:
-    st.session_state.selecoes_usuario = {}
+if "recortes_lote" not in st.session_state:
+    st.session_state.recortes_lote = []
 
 def renderizar_autenticacao():
     col_v1, col_center, col_v2 = st.columns([1, 2, 1])
@@ -372,87 +378,83 @@ def renderizar_autenticacao():
                             st.rerun()
 
 # ==============================================================================
-# FERRAMENTA DE RECORTE DE ETIQUETAS
+# FERRAMENTA DE RECORTE (COM BOTÃO DE DISPARO E PROCESSAMENTO EM LOTE)
 # ==============================================================================
 def renderizar_ferramenta_recorte():
     col_upload, col_painel = st.columns([2.2, 1])
     
-    total_fotos = 0
-    recortes_finais = []
-    
     with col_upload:
         arquivos = st.file_uploader(
-            "📁 Envie fotos contendo etiquetas (Embratel / Código de Barras)", 
+            "📁 Selecione as fotos do lote (Embratel / Código de Barras)", 
             type=["jpg", "png", "jpeg"], 
             accept_multiple_files=True
         )
         
         if arquivos:
-            total_fotos = len(arquivos)
-            st.write("---")
+            total = len(arquivos)
+            st.info(f"📌 **{total} fotos** carregadas e prontas para processamento.")
             
-            for idx, arq in enumerate(arquivos):
-                bytes_img = arq.getvalue()
-                candidatos = extrair_candidatos_etiqueta(bytes_img)
+            # BOTÃO PARA DISPARAR O RECORTE DO LOTE INTEIRO DE UMA VEZ
+            if st.button("🚀 INICIAR RECORTE AUTOMÁTICO", key="btn_iniciar_recorte"):
+                recortes = []
+                barra_progresso = st.progress(0)
+                status_texto = st.empty()
                 
-                st.markdown(f"#### 📷 Imagem #{idx+1}: `{arq.name}`")
-                
-                if not candidatos:
-                    st.warning("⚠️ Nenhuma etiqueta detectada automaticamente nesta imagem.")
-                
-                elif len(candidatos) == 1 and candidatos[0]["confianca"] == "alta":
-                    img_recortada = candidatos[0]["imagem"]
-                    st.image(img_recortada, width=380, caption="Etiqueta Recortada com Precisão (best.pt)")
-                    recortes_finais.append((f"etiqueta_{idx+1}.png", converter_imagem_para_bytes(img_recortada)))
-                
-                else:
-                    st.info("🤔 **Identificamos mais de uma opção.** Escolha a etiqueta correta abaixo:")
-                    cols = st.columns(min(len(candidatos), 3))
+                for idx, arq in enumerate(arquivos):
+                    status_texto.text(f"Processando foto {idx+1} de {total}: {arq.name}...")
+                    bytes_img = arq.getvalue()
+                    candidatos = extrair_candidatos_etiqueta(bytes_img)
                     
-                    for c_idx, cand in enumerate(candidatos[:3]):
-                        with cols[c_idx]:
-                            st.image(cand["imagem"], use_container_width=True)
-                            chave_btn = f"sel_{idx}_{c_idx}"
-                            
-                            is_selected = st.session_state.selecoes_usuario.get(idx) == c_idx
-                            
-                            if st.button(f"{'✅ Selecionada' if is_selected else 'Escolher Esta'}", key=chave_btn):
-                                st.session_state.selecoes_usuario[idx] = c_idx
-                                st.rerun()
+                    if candidatos:
+                        # Seleciona automaticamente o melhor resultado detectado pelo best.pt
+                        melhor_crop = candidatos[0]["imagem"]
+                        recortes.append((f"etiqueta_{idx+1}_{arq.name}", converter_imagem_para_bytes(melhor_crop)))
                     
-                    opcao_escolhida = st.session_state.selecoes_usuario.get(idx)
-                    if opcao_escolhida is not None and opcao_escolhida < len(candidatos):
-                        img_sel = candidatos[opcao_escolhida]["imagem"]
-                        recortes_finais.append((f"etiqueta_{idx+1}_opcao_{opcao_escolhida+1}.png", converter_imagem_para_bytes(img_sel)))
+                    barra_progresso.progress((idx + 1) / total)
                 
+                status_texto.empty()
+                barra_progresso.empty()
+                st.session_state.recortes_lote = recortes
+                st.success(f"⚡ Sucesso! {len(recortes)} de {total} etiquetas foram recortadas automaticamente pelo best.pt.")
+            
+            # Pré-visualização se o processamento já tiver sido feito
+            if st.session_state.recortes_lote:
                 st.write("---")
+                st.markdown("##### 👁️ Amostra das Etiquetas Recortadas")
+                cols_prev = st.columns(3)
+                for p_idx, (nome, b_img) in enumerate(st.session_state.recortes_lote[:6]):
+                    with cols_prev[p_idx % 3]:
+                        st.image(b_img, caption=nome, use_container_width=True)
 
     with col_painel:
         st.markdown("### 📊 Painel do Lote")
         
+        qtd_arquivos = len(arquivos) if arquivos else 0
+        qtd_recortadas = len(st.session_state.recortes_lote) if arquivos else 0
+        
         st.markdown(f"""
             <div class="stat-card">
-                <div class="stat-number">{total_fotos}</div>
-                <div class="stat-label">Fotos Processadas</div>
+                <div class="stat-number">{qtd_arquivos}</div>
+                <div class="stat-label">Fotos Carregadas</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">{len(recortes_finais)}</div>
-                <div class="stat-label">Etiquetas Confirmadas</div>
+                <div class="stat-number">{qtd_recortadas}</div>
+                <div class="stat-label">Etiquetas Prontas</div>
             </div>
         """, unsafe_allow_html=True)
 
-        if recortes_finais:
+        if st.session_state.recortes_lote and arquivos:
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for nome_arq, dados_bytes in recortes_finais:
+                for nome_arq, dados_bytes in st.session_state.recortes_lote:
                     if dados_bytes:
                         zip_file.writestr(nome_arq, dados_bytes)
             
-            st.markdown("#### 📦 Download Final")
+            st.markdown("#### 📦 Download Express")
             st.download_button(
-                label=f"⬇️ BAIXAR {len(recortes_finais)} ETIQUETAS (.ZIP)",
+                label=f"⬇️ BAIXAR {len(st.session_state.recortes_lote)} ETIQUETAS (.ZIP)",
                 data=zip_buffer.getvalue(),
-                file_name="etiquetas_recortadas.zip",
+                file_name="lote_etiquetas_recortadas.zip",
                 mime="application/zip",
                 key="btn_download_zip_lote"
             )
@@ -545,6 +547,7 @@ def main():
 
         if st.button("🚪 Sair do Sistema"):
             st.session_state.usuario_logado = None
+            st.session_state.recortes_lote = []
             st.rerun()
 
     st.markdown("""
