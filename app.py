@@ -18,7 +18,7 @@ except ImportError:
     YOLO_DISPONIVEL = False
 
 # ==============================================================================
-# CONFIGURAÇÕES DA PÁGINA E CSS
+# CONFIGURAÇÕES DA PÁGINA E CSS (VISUAL ORIGINAL)
 # ==============================================================================
 st.set_page_config(
     page_title="Sistema de Recorte",
@@ -118,16 +118,19 @@ def salvar_json(caminho, dados):
         json.dump(dados, f, indent=4, ensure_ascii=False)
 
 def carregar_usuarios():
-    padrao = {
-        "admin@empresa.com.br": {
-            "nome": "Administrador",
-            "senha": gerar_hash_senha("admin123"),
-            "cargo": "Administrador",
-            "status": "ativo",
-            "email_verificado": True
-        }
+    # Carrega os usuários do arquivo JSON se existir
+    usuarios = carregar_json(ARQUIVO_USUARIOS, {})
+    
+    # FORÇA a existência do Admin Principal funcional (Senha: admin123)
+    usuarios["admin@empresa.com.br"] = {
+        "nome": "Administrador",
+        "senha": gerar_hash_senha("admin123"),
+        "cargo": "Administrador",
+        "status": "ativo",
+        "email_verificado": True
     }
-    return carregar_json(ARQUIVO_USUARIOS, padrao)
+    
+    return usuarios
 
 def salvar_usuarios(usuarios):
     salvar_json(ARQUIVO_USUARIOS, usuarios)
@@ -287,7 +290,7 @@ def renderizar_autenticacao():
                 else:
                     st.error("E-mail não encontrado.")
 
-    # --- ABA 3: CRIAR CONTA (SEM CAMPO DE CARGO) ---
+    # --- ABA 3: CRIAR CONTA ---
     with aba_cadastro:
         if st.session_state.etapa_cadastro == "formulario":
             with st.form("form_criar"):
@@ -307,7 +310,7 @@ def renderizar_autenticacao():
                         usuarios[email] = {
                             "nome": nome,
                             "senha": gerar_hash_senha(senha),
-                            "cargo": "Operador",  # Define 'Operador' automaticamente como padrão
+                            "cargo": "Operador",
                             "status": "pendente_email",
                             "codigo_verificacao": codigo,
                             "email_verificado": False
@@ -387,8 +390,6 @@ def renderizar_painel_admin():
         else:
             for email, d in pendentes.items():
                 st.write(f"**Nome:** {d['nome']} | **E-mail:** {email}")
-                
-                # Permite ao Admin escolher/confirmar o Cargo antes de aprovar
                 novo_cargo = st.selectbox(f"Definir Cargo para {d['nome']}", ["Operador", "Administrador"], key=f"cargo_{email}")
                 
                 col1, col2 = st.columns(6)
