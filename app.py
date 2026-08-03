@@ -8,6 +8,8 @@ import smtplib
 import random
 import string
 import hashlib
+import io
+import zipfile
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -71,7 +73,7 @@ st.markdown("""
     }
     
     /* Botões */
-    .stButton > button {
+    .stButton > button, .stDownloadButton > button {
         width: 100%;
         background-color: #2c2c2e;
         color: #ffffff;
@@ -81,7 +83,7 @@ st.markdown("""
         font-weight: 600;
         transition: all 0.3s ease;
     }
-    .stButton > button:hover {
+    .stButton > button:hover, .stDownloadButton > button:hover {
         background-color: #3a3a3c;
         border-color: #545458;
         color: #ffffff;
@@ -202,6 +204,14 @@ def enviar_notificacao_aprovacao(email_destino, nome_usuario):
     """
     return enviar_email_smtp(email_destino, assunto, corpo)
 
+# Conversor de Array NumPy (RGB) para Bytes de Imagem (PNG)
+def converter_imagem_para_bytes(img_rgb):
+    img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+    is_success, buffer = cv2.imencode(".png", img_bgr)
+    if is_success:
+        return buffer.tobytes()
+    return None
+
 # ==============================================================================
 # VISÃO COMPUTACIONAL & RECORTE DE ETIQUETAS
 # ==============================================================================
@@ -215,10 +225,6 @@ def carregar_modelo_yolo():
     return None
 
 def processar_etiqueta(imagem_bytes):
-    """
-    Decodifica a imagem e realiza o RECORTE exato das etiquetas detectadas pelo YOLO.
-    Caso não exista o modelo YOLO, realiza a detecção por contornos (OpenCV Fallback).
-    """
     image_np = np.frombuffer(imagem_bytes, np.uint8)
     img = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
     h_orig, w_orig = img.shape[:2]
@@ -230,16 +236,11 @@ def processar_etiqueta(imagem_bytes):
         resultados = modelo(img)
         for r in resultados:
             for box in r.boxes:
-                # Coordenadas do recorte (Bounding Box)
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
-                
-                # Garante que os limites fiquem dentro das dimensões da imagem
                 x1, y1 = max(0, x1), max(0, y1)
                 x2, y2 = min(w_orig, x2), min(h_orig, y2)
                 
-                # RECORTE (Crop da imagem)
                 crop = img[y1:y2, x1:x2]
-                
                 if crop.size > 0:
                     crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
                     recortes.append({
@@ -247,7 +248,6 @@ def processar_etiqueta(imagem_bytes):
                         "box": (x1, y1, x2, y2)
                     })
     else:
-        # Fallback OpenCV: Recorte automatizado por detecção de contornos
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         blur = cv2.GaussianBlur(gray, (5, 5), 0)
         _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -255,7 +255,6 @@ def processar_etiqueta(imagem_bytes):
         
         for cnt in contours:
             x, y, w, h = cv2.boundingRect(cnt)
-            # Filtra ruidos pequenos
             if w > 50 and h > 50:
                 crop = img[y:y+h, x:x+w]
                 crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
@@ -264,7 +263,6 @@ def processar_etiqueta(imagem_bytes):
                     "box": (x, y, x+w, y+h)
                 })
                 
-    # Se nada for detectado, mantém a imagem original como segurança
     if not recortes:
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         recortes.append({"imagem": img_rgb, "box": (0, 0, w_orig, h_orig)})
@@ -405,13 +403,14 @@ def renderizar_autenticacao():
                     st.rerun()
 
 # ==============================================================================
-# PAINEL DE FERRAMENTA DE RECORTE (EXIBIÇÃO DOS RECORTES GERADOS)
+# PAINEL DE FERRAMENTA DE RECORTE (DOWNLOAD DE IMAGENS & ZIP)
 # ==============================================================================
 def renderizar_ferramenta_recorte():
     col_upload, col_painel = st.columns([2.2, 1])
     
     total_fotos = 0
     total_recortes = 0
+    todos_recortes_bytes = [] # Para a criação do arquivo .ZIP
     
     with col_upload:
         arquivos = st.file_uploader(
@@ -437,7 +436,24 @@ def renderizar_ferramenta_recorte():
                 with c_recortes:
                     st.markdown("##### ✂️ Recortes Detectados:")
                     for i, r in enumerate(recortes):
-                        st.image(r["imagem"], use_container_width=True, caption=f"Recorte #{i+1} - Box: {r['box']}")
+                        st.image(r["imagem"], use_container_width=True, caption=f"Recorte #{i+1}")
+                        
+                        # Converte recorte para bytes para download
+                        img_bytes = converter_imagem_para_bytes(r["imagem"])
+                        if img_bytes:
+                            nome_arquivo_recorte = f"recorte_{idx+1}_{i+1}.png"
+                            
+                            # Adiciona à lista geral para o ZIP
+                            todos_recortes_bytes.append((nome_arquivo_recorte, img_bytes))
+                            
+                            # Botão de download individual
+                            st.download_button(
+                                label=f"⬇️ Baixar Recorte #{i+1}",
+                                data=img_bytes,
+                                file_name=nome_arquivo_recorte,
+                                mime="image/png",
+                                key=f"dl_{idx}_{i}"
+                            )
 
     with col_painel:
         st.markdown("### 📊 Painel do Lote")
@@ -452,6 +468,22 @@ def renderizar_ferramenta_recorte():
                 <div class="stat-label">Recortes Prontos</div>
             </div>
         """, unsafe_allow_html=True)
+
+        # Botão para Baixar Todos os Recortes em arquivo .ZIP
+        if todos_recortes_bytes:
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                for nome_arq, dados_bytes in todos_recortes_bytes:
+                    zip_file.writestr(nome_arq, dados_bytes)
+            
+            st.write("---")
+            st.download_button(
+                label="📦 Baixar Todos os Recortes (.ZIP)",
+                data=zip_buffer.getvalue(),
+                file_name="todos_os_recortes.zip",
+                mime="application/zip",
+                key="btn_download_zip_lote"
+            )
 
 # ==============================================================================
 # PAINEL DO ADMINISTRADOR
@@ -557,7 +589,6 @@ def main():
     if not st.session_state.usuario_logado:
         renderizar_autenticacao()
     else:
-        # Cabeçalho Principal
         c_head1, c_head2 = st.columns([1, 4])
         with c_head1:
             st.markdown("<h1 style='font-size: 38px; margin: 0;'>LOGO</h1>", unsafe_allow_html=True)
@@ -571,7 +602,6 @@ def main():
         
         cargo = st.session_state.usuario_logado["cargo"]
         
-        # Navegação por Abas para Administrador ou Direto para Operador
         if cargo == "Administrador":
             tab_recorte, tab_admin = st.tabs(["✂️ Ferramenta de Recorte", "👑 Painel do Administrador"])
             with tab_recorte:
@@ -581,13 +611,11 @@ def main():
         else:
             renderizar_ferramenta_recorte()
 
-        # Botão para deslogar
         st.write("")
         if st.button("🚪 Sair do Sistema", key="btn_logout_top"):
             st.session_state.usuario_logado = None
             st.rerun()
 
-    # Rodapé
     st.markdown("""
         <div class="footer-text">
             Desenvolvido por <b>Diego Costa</b>
