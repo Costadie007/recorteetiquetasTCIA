@@ -402,10 +402,14 @@ def renderizar_ferramenta_recorte():
             </div>
         """, unsafe_allow_html=True)
 
+# ==============================================================================
+# PAINEL DO ADMINISTRADOR (COM ABA DE GERENCIAMENTO DE USUÁRIOS)
+# ==============================================================================
 def renderizar_painel_admin():
     st.markdown("### ⚙️ Painel do Administrador")
-    t1, t2 = st.tabs(["Aprovação de Usuários", "Configuração SMTP"])
+    t1, t2, t3 = st.tabs(["Aprovação de Usuários", "👥 Gerenciar Usuários", "Configuração SMTP"])
     
+    # --- ABA 1: APROVAÇÃO ---
     with t1:
         usuarios = carregar_usuarios()
         pendentes = {
@@ -420,7 +424,6 @@ def renderizar_painel_admin():
                 st.write(f"**Nome:** {d['nome']} | **E-mail:** {email}")
                 novo_cargo = st.selectbox(f"Definir Cargo para {d['nome']}", ["Operador", "Administrador"], key=f"cargo_{email}")
                 
-                # Ajuste no número de colunas para evitar o ValueError
                 col1, col2, _ = st.columns([1, 1, 4])
                 if col1.button("Aprovar", key=f"ap_{email}"):
                     usuarios[email]["cargo"] = novo_cargo
@@ -433,8 +436,44 @@ def renderizar_painel_admin():
                     salvar_usuarios(usuarios)
                     st.warning("Solicitação removida.")
                     st.rerun()
-                    
+
+    # --- ABA 2: GERENCIAR E REMOVER USUÁRIOS ---
     with t2:
+        st.markdown("#### Usuários Cadastrados no Sistema")
+        usuarios = carregar_usuarios()
+        
+        if usuarios:
+            # Monta tabela visual dos usuários
+            dados_tabela = []
+            for email, u in usuarios.items():
+                dados_tabela.append({
+                    "Nome": u.get("nome", "-"),
+                    "E-mail": email,
+                    "Cargo": u.get("cargo", "-"),
+                    "Status": u.get("status", "-")
+                })
+            
+            st.dataframe(dados_tabela, use_container_width=True)
+            st.write("---")
+            
+            # Seção de Exclusão de Usuário
+            st.markdown("#### 🗑️ Remover Usuário")
+            lista_emails = [e for e in usuarios.keys() if e != "admin@empresa.com.br"]
+            
+            if not lista_emails:
+                st.caption("Não há outros usuários cadastrados além do Admin Principal.")
+            else:
+                usuario_para_remover = st.selectbox("Selecione o e-mail para remover:", lista_emails)
+                
+                col_btn, _ = st.columns([1, 3])
+                if col_btn.button("❌ Excluir Usuário Selecionado", type="secondary"):
+                    del usuarios[usuario_para_remover]
+                    salvar_usuarios(usuarios)
+                    st.success(f"Usuário {usuario_para_remover} removido com sucesso!")
+                    st.rerun()
+
+    # --- ABA 3: CONFIGURAÇÃO SMTP ---
+    with t3:
         cfg = carregar_config_smtp()
         with st.form("f_smtp"):
             srv = st.text_input("Servidor SMTP", value=cfg.get("servidor", ""))
@@ -448,13 +487,13 @@ def renderizar_painel_admin():
                 st.success("Configurações salvas!")
 
 # ==============================================================================
-# ROUTER PRINCIPAL (CABEÇALHO FIXO + NAVEGAÇÃO SUPERIOR)
+# ROUTER PRINCIPAL
 # ==============================================================================
 def main():
     if not st.session_state.usuario_logado:
         renderizar_autenticacao()
     else:
-        # Cabeçalho Principal (Igual ao modelo visual desejado)
+        # Cabeçalho Principal
         c_head1, c_head2 = st.columns([1, 4])
         with c_head1:
             st.markdown("<h1 style='font-size: 38px; margin: 0;'>LOGO</h1>", unsafe_allow_html=True)
@@ -466,7 +505,6 @@ def main():
 
         st.write("")
         
-        user_nome = st.session_state.usuario_logado['nome']
         cargo = st.session_state.usuario_logado["cargo"]
         
         # Navegação por Abas para Administrador ou Direto para Operador
