@@ -99,7 +99,7 @@ ARQUIVO_SMTP = "config_smtp.json"
 MODELO_YOLO_PATH = "best.pt"
 
 # Link da sua aplicação hospedada no Streamlit Cloud
-URL_APLICACAO = "https://recorteetiquetastcia.streamlit.app"
+URL_APLICACAO = "https://recorteetiquetas.streamlit.app/"
 
 if os.name == 'nt':
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
