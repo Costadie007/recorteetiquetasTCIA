@@ -13,6 +13,7 @@ import zipfile
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+# Importação da Inteligência Artificial YOLO
 try:
     from ultralytics import YOLO
     YOLO_DISPONIVEL = True
@@ -100,6 +101,23 @@ URL_APLICACAO = "https://recorteetiquetas.streamlit.app/"
 
 if os.name == 'nt':
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+# ==============================================================================
+# CARREGAMENTO DO SEU MODELO TREINADO (best.pt)
+# ==============================================================================
+@st.cache_resource
+def carregar_modelo_yolo():
+    if not YOLO_DISPONIVEL:
+        return None
+    try:
+        # Carrega o modelo treinado que está no seu repositório GitHub
+        if os.path.exists("best.pt"):
+            return YOLO("best.pt")
+        # Fallback de segurança se o arquivo não estiver presente na raiz
+        return YOLO("yolov8n.pt")
+    except Exception as e:
+        st.error(f"Erro ao carregar o modelo YOLO (best.pt): {e}")
+        return None
 
 # ==============================================================================
 # FUNÇÕES HELPER & SMTP
@@ -204,7 +222,7 @@ def converter_imagem_para_bytes(img_rgb):
     return None
 
 # ==============================================================================
-# ALGORITMO DE DETECÇÃO DE ETIQUETA
+# ALGORITMO COM INTELIGÊNCIA ARTIFICIAL YOLO (best.pt)
 # ==============================================================================
 def extrair_candidatos_etiqueta(imagem_bytes):
     image_np = np.frombuffer(imagem_bytes, np.uint8)
@@ -214,62 +232,62 @@ def extrair_candidatos_etiqueta(imagem_bytes):
 
     h_orig, w_orig = img_bgr.shape[:2]
     candidatos = []
-
-    # Método A: Detector de Código de Barras OpenCV
-    try:
-        detector = None
-        if hasattr(cv2, 'barcode') and hasattr(cv2.barcode, 'BarcodeDetector'):
-            detector = cv2.barcode.BarcodeDetector()
-        elif hasattr(cv2, 'BarcodeDetector'):
-            detector = cv2.BarcodeDetector()
-
-        if detector is not None:
-            ok, _, _, points = detector.detectAndDecode(img_bgr)
-            if ok and points is not None:
-                for pts in points:
-                    pts = pts.astype(int)
-                    x_min, y_min = np.min(pts, axis=0)
-                    x_max, y_max = np.max(pts, axis=0)
+    
+    modelo = carregar_modelo_yolo()
+    
+    # 1. PROCESSAMENTO VIA MODELO TREINADO (best.pt)
+    if modelo is not None:
+        resultados = modelo(img_bgr, verbose=False)
+        for r in resultados:
+            for box in r.boxes:
+                conf = float(box.conf[0])
+                if conf > 0.30: # Threshold de detecção flexível
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
                     
-                    pad_w = int((x_max - x_min) * 0.30)
-                    pad_h = int((y_max - y_min) * 1.50)
+                    # Leve margem ao redor para evitar cortar o contorno da etiqueta
+                    pad_w = int((x2 - x1) * 0.03)
+                    pad_h = int((y2 - y1) * 0.03)
                     
-                    x1, y1 = max(0, x_min - pad_w), max(0, y_min - pad_h)
-                    x2, y2 = min(w_orig, x_max + pad_w), min(h_orig, y_max + pad_h)
+                    crop_x1 = max(0, x1 - pad_w)
+                    crop_y1 = max(0, y1 - pad_h)
+                    crop_x2 = min(w_orig, x2 + pad_w)
+                    crop_y2 = min(h_orig, y2 + pad_h)
                     
-                    crop = img_bgr[y1:y2, x1:x2]
+                    crop = img_bgr[crop_y1:crop_y2, crop_x1:crop_x2]
                     if crop.size > 0:
                         candidatos.append({
                             "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
-                            "confianca": "alta"
+                            "confianca": "alta" if conf > 0.55 else "media"
                         })
-    except Exception:
-        pass
 
-    # Método B: Análise Morfológica em Grayscale
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 5))
-    grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
-    _, thresh = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-    
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    for cnt in contours:
-        x, y, w, h = cv2.boundingRect(cnt)
-        aspect_ratio = float(w) / max(h, 1)
-        area = w * h
+    # 2. FALLBACK SECUNDÁRIO CASO NÃO IDENTIFIQUE PELO BEST.PT
+    if not candidatos:
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        gray_contrast = clahe.apply(gray)
         
-        if aspect_ratio >= 1.8 and area > (w_orig * h_orig * 0.005):
-            x1, y1 = max(0, x - 12), max(0, y - 12)
-            x2, y2 = min(w_orig, x + w + 12), min(h_orig, y + h + 12)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 7))
+        grad = cv2.morphologyEx(gray_contrast, cv2.MORPH_GRADIENT, kernel)
+        _, thresh = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            aspect_ratio = float(w) / max(h, 1)
+            area = w * h
             
-            crop = img_bgr[y1:y2, x1:x2]
-            if crop.size > 0:
-                candidatos.append({
-                    "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
-                    "confianca": "media"
-                })
+            if 1.5 <= aspect_ratio <= 6.0 and (w_orig * h_orig * 0.008) < area < (w_orig * h_orig * 0.7):
+                x1, y1 = max(0, x - 15), max(0, y - 15)
+                x2, y2 = min(w_orig, x + w + 15), min(h_orig, y + h + 15)
+                
+                crop = img_bgr[y1:y2, x1:x2]
+                if crop.size > 0:
+                    candidatos.append({
+                        "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
+                        "confianca": "media"
+                    })
 
     return candidatos
 
@@ -354,7 +372,7 @@ def renderizar_autenticacao():
                             st.rerun()
 
 # ==============================================================================
-# FERRAMENTA DE RECORTE
+# FERRAMENTA DE RECORTE DE ETIQUETAS
 # ==============================================================================
 def renderizar_ferramenta_recorte():
     col_upload, col_painel = st.columns([2.2, 1])
@@ -384,7 +402,7 @@ def renderizar_ferramenta_recorte():
                 
                 elif len(candidatos) == 1 and candidatos[0]["confianca"] == "alta":
                     img_recortada = candidatos[0]["imagem"]
-                    st.image(img_recortada, width=350, caption="Etiqueta Recortada com Precisão")
+                    st.image(img_recortada, width=380, caption="Etiqueta Recortada com Precisão (best.pt)")
                     recortes_finais.append((f"etiqueta_{idx+1}.png", converter_imagem_para_bytes(img_recortada)))
                 
                 else:
@@ -440,7 +458,7 @@ def renderizar_ferramenta_recorte():
             )
 
 # ==============================================================================
-# PAINEL DO ADMINISTRADOR (COM BOTÕES DE REFRESH/ATUALIZAÇÃO)
+# PAINEL DO ADMINISTRADOR
 # ==============================================================================
 def renderizar_painel_admin():
     st.markdown("### ⚙️ Painel do Administrador")
@@ -512,7 +530,7 @@ def main():
         with c_head2:
             st.markdown("""
                 <h1 style='font-size: 32px; margin: 0;'>Recorte de Etiquetas</h1>
-                <p style='color: #a1a1a6; margin-top: 5px;'>Identificador e extrator inteligente de etiquetas.</p>
+                <p style='color: #a1a1a6; margin-top: 5px;'>Identificador e extrator inteligente de etiquetas via IA YOLOv8.</p>
             """, unsafe_allow_html=True)
 
         cargo = st.session_state.usuario_logado["cargo"]
