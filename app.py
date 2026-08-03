@@ -102,6 +102,8 @@ st.markdown("""
 ARQUIVO_USUARIOS = "usuarios.json"
 ARQUIVO_SMTP = "config_smtp.json"
 MODELO_YOLO_PATH = "best.pt"
+# URL da sua aplicação implantada no Streamlit Cloud ou servidor
+URL_APLICACAO = "https://recorteetiquetastcia.streamlit.app" 
 
 if os.name == 'nt':
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -179,6 +181,23 @@ def enviar_codigo_email(email_destino, codigo):
             {codigo}
         </div>
         <p style="margin-top: 20px; font-size: 12px; color: #a1a1a6;">Insira este código na tela para submeter seu cadastro ao Administrador.</p>
+    </div>
+    """
+    return enviar_email_smtp(email_destino, assunto, corpo)
+
+def enviar_notificacao_aprovacao(email_destino, nome_usuario):
+    assunto = "🎉 Seu Acesso Foi Aprovado - Recorte de Etiquetas"
+    corpo = f"""
+    <div style="font-family: Arial, sans-serif; background-color: #2c2c2e; color: #ffffff; padding: 25px; border-radius: 8px;">
+        <h2 style="color: #34c759; margin-top: 0;">Conta Aprovada!</h2>
+        <p>Olá, <b>{nome_usuario}</b>!</p>
+        <p>Sua solicitação de cadastro foi aprovada pelo Administrador. Você já pode acessar a plataforma para realizar os recortes de etiquetas.</p>
+        <div style="margin: 30px 0; text-align: center;">
+            <a href="{URL_APLICACAO}" style="background-color: #ff9500; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+                🚀 Acessar o Sistema
+            </a>
+        </div>
+        <p style="font-size: 12px; color: #a1a1a6;">Se o botão não funcionar, acesse via o link: <br><a href="{URL_APLICACAO}" style="color: #ff9500;">{URL_APLICACAO}</a></p>
     </div>
     """
     return enviar_email_smtp(email_destino, assunto, corpo)
@@ -356,7 +375,7 @@ def renderizar_autenticacao():
                     st.rerun()
 
 # ==============================================================================
-# PAINEL DE OPERAÇÃO / DASHBOARD (LAYOUT ORIGINAL DE 2 COLUNAS)
+# PAINEL DE OPERAÇÃO / DASHBOARD
 # ==============================================================================
 def renderizar_ferramenta_recorte():
     col_upload, col_painel = st.columns([2.2, 1])
@@ -403,7 +422,7 @@ def renderizar_ferramenta_recorte():
         """, unsafe_allow_html=True)
 
 # ==============================================================================
-# PAINEL DO ADMINISTRADOR (COM ABA DE GERENCIAMENTO DE USUÁRIOS)
+# PAINEL DO ADMINISTRADOR (ATUALIZAÇÃO EM TEMPO REAL + NOTIFICAÇÃO VIA EMAIL)
 # ==============================================================================
 def renderizar_painel_admin():
     st.markdown("### ⚙️ Painel do Administrador")
@@ -411,6 +430,14 @@ def renderizar_painel_admin():
     
     # --- ABA 1: APROVAÇÃO ---
     with t1:
+        c_top1, c_top2 = st.columns([3, 1])
+        with c_top1:
+            st.markdown("#### Solicitações de Acesso")
+        with c_top2:
+            if st.button("🔄 Atualizar Lista de Pendentes"):
+                st.rerun()
+
+        # Lê os dados em disco em tempo real
         usuarios = carregar_usuarios()
         pendentes = {
             e: d for e, d in usuarios.items() 
@@ -418,7 +445,7 @@ def renderizar_painel_admin():
         }
         
         if not pendentes:
-            st.info("Nenhuma conta pendente de aprovação.")
+            st.info("Nenhuma conta pendente de aprovação no momento.")
         else:
             for email, d in pendentes.items():
                 st.write(f"**Nome:** {d['nome']} | **E-mail:** {email}")
@@ -429,8 +456,17 @@ def renderizar_painel_admin():
                     usuarios[email]["cargo"] = novo_cargo
                     usuarios[email]["status"] = "ativo"
                     salvar_usuarios(usuarios)
-                    st.success(f"{email} aprovado como {novo_cargo}!")
+                    
+                    # Envio do E-mail notificando o usuário com o link do site
+                    ok_envio, msg_envio = enviar_notificacao_aprovacao(email, d['nome'])
+                    
+                    if ok_envio:
+                        st.success(f"✅ {email} aprovado como {novo_cargo}! E-mail com link enviado com sucesso.")
+                    else:
+                        st.warning(f"✅ {email} aprovado, mas falhou o envio do e-mail: {msg_envio}")
+                        
                     st.rerun()
+
                 if col2.button("Rejeitar", key=f"rej_{email}"):
                     del usuarios[email]
                     salvar_usuarios(usuarios)
@@ -443,7 +479,6 @@ def renderizar_painel_admin():
         usuarios = carregar_usuarios()
         
         if usuarios:
-            # Monta tabela visual dos usuários
             dados_tabela = []
             for email, u in usuarios.items():
                 dados_tabela.append({
@@ -456,7 +491,6 @@ def renderizar_painel_admin():
             st.dataframe(dados_tabela, use_container_width=True)
             st.write("---")
             
-            # Seção de Exclusão de Usuário
             st.markdown("#### 🗑️ Remover Usuário")
             lista_emails = [e for e in usuarios.keys() if e != "admin@empresa.com.br"]
             
