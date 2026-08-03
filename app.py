@@ -18,12 +18,12 @@ except ImportError:
     YOLO_DISPONIVEL = False
 
 # ==============================================================================
-# CONFIGURAÇÕES DA PÁGINA E CSS (VISUAL ORIGINAL)
+# CONFIGURAÇÕES DA PÁGINA (WIDE) E CSS CUSTOMIZADO
 # ==============================================================================
 st.set_page_config(
-    page_title="Sistema de Recorte",
+    page_title="Recorte de Etiquetas",
     page_icon="✂️",
-    layout="centered"
+    layout="wide"
 )
 
 st.markdown("""
@@ -33,60 +33,68 @@ st.markdown("""
     footer {visibility: hidden;}
     #MainMenu {visibility: hidden;}
     
-    /* Fundo geral escuro */
+    /* Fundo escuro */
     .stApp {
         background-color: #1c1c1e;
         color: #ffffff;
     }
     
-    /* Container do Cabeçalho */
-    .header-card {
-        background-color: #2c2c2e;
-        border-radius: 12px;
-        padding: 30px;
-        text-align: center;
-        margin-bottom: 25px;
-        border: 1px solid #3a3a3c;
-    }
-    .header-title {
-        font-size: 32px;
-        font-weight: 700;
-        color: #ffffff;
-        margin: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
-    }
-    .header-subtitle {
-        color: #a1a1a6;
-        font-size: 14px;
-        margin-top: 10px;
-    }
-    
-    /* Inputs customizados */
+    /* Inputs */
     div[data-baseweb="input"] {
-        background-color: #1c1c1e !important;
+        background-color: #2c2c2e !important;
         border-color: #3a3a3c !important;
         border-radius: 8px !important;
         color: #ffffff !important;
     }
     
+    /* Cards de Estatísticas (Painel do Lote) */
+    .stat-card {
+        background-color: #2c2c2e;
+        border: 1px solid #3a3a3c;
+        border-radius: 8px;
+        padding: 20px;
+        text-align: center;
+        margin-bottom: 15px;
+    }
+    .stat-number {
+        font-size: 32px;
+        font-weight: bold;
+        color: #ff9500;
+        margin-bottom: 5px;
+    }
+    .stat-label {
+        font-size: 11px;
+        color: #a1a1a6;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        font-weight: 600;
+    }
+    
     /* Botões */
     .stButton > button {
         width: 100%;
-        background-color: #141c2b;
+        background-color: #2c2c2e;
         color: #ffffff;
-        border: 1px solid #2c3a4e;
+        border: 1px solid #3a3a3c;
         border-radius: 8px;
         padding: 10px 16px;
         font-weight: 600;
         transition: all 0.3s ease;
     }
     .stButton > button:hover {
-        background-color: #1e2c44;
-        border-color: #40587c;
+        background-color: #3a3a3c;
+        border-color: #545458;
         color: #ffffff;
+    }
+    
+    /* Rodapé */
+    .footer-text {
+        text-align: center;
+        color: #8e8e93;
+        font-size: 13px;
+        margin-top: 50px;
+        padding-top: 20px;
+        border-top: 1px solid #2c2c2e;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -118,10 +126,8 @@ def salvar_json(caminho, dados):
         json.dump(dados, f, indent=4, ensure_ascii=False)
 
 def carregar_usuarios():
-    # Carrega os usuários do arquivo JSON se existir
     usuarios = carregar_json(ARQUIVO_USUARIOS, {})
-    
-    # FORÇA a existência do Admin Principal funcional (Senha: admin123)
+    # Força a existência do admin master com hash correto da senha 'admin123'
     usuarios["admin@empresa.com.br"] = {
         "nome": "Administrador",
         "senha": gerar_hash_senha("admin123"),
@@ -129,7 +135,6 @@ def carregar_usuarios():
         "status": "ativo",
         "email_verificado": True
     }
-    
     return usuarios
 
 def salvar_usuarios(usuarios):
@@ -165,12 +170,12 @@ def enviar_email_smtp(destino, assunto, corpo_html):
         return False, str(e)
 
 def enviar_codigo_email(email_destino, codigo):
-    assunto = "Código de Verificação - Sistema de Recorte"
+    assunto = "Código de Verificação - Recorte de Etiquetas"
     corpo = f"""
     <div style="font-family: Arial, sans-serif; background-color: #2c2c2e; color: #ffffff; padding: 20px; border-radius: 8px;">
-        <h2 style="color: #ff6600;">Código de Verificação</h2>
-        <p>Seu código para validar o e-mail no Sistema de Recorte é:</p>
-        <div style="background-color: #1c1c1e; font-size: 32px; font-weight: bold; color: #ff6600; padding: 15px; text-align: center; letter-spacing: 8px; border-radius: 8px; width: 200px;">
+        <h2 style="color: #ff9500;">Código de Verificação</h2>
+        <p>Seu código para validar o e-mail no Recorte de Etiquetas é:</p>
+        <div style="background-color: #1c1c1e; font-size: 32px; font-weight: bold; color: #ff9500; padding: 15px; text-align: center; letter-spacing: 8px; border-radius: 8px; width: 200px;">
             {codigo}
         </div>
         <p style="margin-top: 20px; font-size: 12px; color: #a1a1a6;">Insira este código na tela para submeter seu cadastro ao Administrador.</p>
@@ -228,154 +233,177 @@ if "email_em_verificacao" not in st.session_state:
     st.session_state.email_em_verificacao = None
 
 # ==============================================================================
-# INTERFACE DE AUTENTICAÇÃO
+# TELA DE AUTENTICAÇÃO
 # ==============================================================================
 def renderizar_autenticacao():
-    st.markdown("""
-        <div class="header-card">
-            <div class="header-title">
-                <span style="color: #ff4a5a; font-size: 38px;">✂️</span> Sistema de Recorte
+    col_v1, col_center, col_v2 = st.columns([1, 2, 1])
+    with col_center:
+        st.markdown("""
+            <div style="text-align: center; margin-bottom: 30px; margin-top: 40px;">
+                <h1 style="font-size: 36px; font-weight: bold; margin: 0;">LOGO &nbsp;&nbsp;&nbsp;&nbsp; Recorte de Etiquetas</h1>
+                <p style="color: #a1a1a6; font-size: 14px; margin-top: 10px;">Acesse com sua conta, recupere seu acesso ou crie um novo cadastro</p>
             </div>
-            <div class="header-subtitle">
-                Acesse com sua conta, recupere seu acesso ou crie um novo cadastro
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
-    aba_login, aba_esqueci, aba_cadastro = st.tabs([
-        "🔑 Entrar", 
-        "🔒 Esqueci a Senha", 
-        "📝 Criar Conta"
-    ])
-    
-    # --- ABA 1: ENTRAR ---
-    with aba_login:
-        with st.form("form_login"):
-            usuario = st.text_input("Usuário").strip().lower()
-            senha = st.text_input("Senha", type="password")
-            btn_entrar = st.form_submit_button("Acessar Plataforma")
-            
-            if btn_entrar:
-                usuarios = carregar_usuarios()
-                senha_h = gerar_hash_senha(senha)
+        aba_login, aba_esqueci, aba_cadastro = st.tabs([
+            "🔑 Entrar", 
+            "🔒 Esqueci a Senha", 
+            "📝 Criar Conta"
+        ])
+        
+        with aba_login:
+            with st.form("form_login"):
+                usuario = st.text_input("Usuário").strip().lower()
+                senha = st.text_input("Senha", type="password")
+                btn_entrar = st.form_submit_button("Acessar Plataforma")
                 
-                if usuario in usuarios:
-                    u = usuarios[usuario]
-                    if u["senha"] == senha_h:
-                        if u.get("status") == "ativo":
-                            st.session_state.usuario_logado = {
-                                "email": usuario, "nome": u["nome"], "cargo": u["cargo"]
-                            }
-                            st.success(f"Bem-vindo(a), {u['nome']}!")
-                            st.rerun()
-                        elif u.get("status") == "pendente_email":
-                            st.warning("E-mail não verificado. Por favor, solicite o cadastro novamente para validar.")
-                        elif u.get("status") == "pendente_aprovação_admin":
-                            st.info("E-mail verificado! Aguardando aprovação do Administrador.")
-                    else:
-                        st.error("Senha incorreta.")
-                else:
-                    st.error("Usuário não encontrado.")
-
-    # --- ABA 2: ESQUECI A SENHA ---
-    with aba_esqueci:
-        with st.form("form_esqueci"):
-            email_rec = st.text_input("Digite o e-mail cadastrado").strip().lower()
-            btn_recuperar = st.form_submit_button("Recuperar Acesso")
-            
-            if btn_recuperar:
-                usuarios = carregar_usuarios()
-                if email_rec in usuarios:
-                    st.info("Instruções de recuperação foram enviadas para o seu e-mail.")
-                else:
-                    st.error("E-mail não encontrado.")
-
-    # --- ABA 3: CRIAR CONTA ---
-    with aba_cadastro:
-        if st.session_state.etapa_cadastro == "formulario":
-            with st.form("form_criar"):
-                nome = st.text_input("Nome Completo")
-                email = st.text_input("E-mail Corporativo").strip().lower()
-                senha = st.text_input("Crie uma Senha", type="password")
-                btn_cadastrar = st.form_submit_button("Enviar e Enviar Código")
-                
-                if btn_cadastrar:
+                if btn_entrar:
                     usuarios = carregar_usuarios()
-                    if not nome or not email or not senha:
-                        st.warning("Preencha todos os campos obrigatórios.")
-                    elif email in usuarios and usuarios[email].get("status") == "ativo":
-                        st.error("E-mail já cadastrado e ativo.")
-                    else:
-                        codigo = gerar_codigo_verificacao()
-                        usuarios[email] = {
-                            "nome": nome,
-                            "senha": gerar_hash_senha(senha),
-                            "cargo": "Operador",
-                            "status": "pendente_email",
-                            "codigo_verificacao": codigo,
-                            "email_verificado": False
-                        }
-                        salvar_usuarios(usuarios)
-                        
-                        ok, msg = enviar_codigo_email(email, codigo)
-                        if ok:
-                            st.session_state.email_em_verificacao = email
-                            st.session_state.etapa_cadastro = "validar_codigo"
-                            st.success("Código enviado para o seu e-mail! Insira-o no próximo passo.")
-                            st.rerun()
-                        else:
-                            st.error(f"Erro ao enviar o e-mail: {msg}")
-
-        elif st.session_state.etapa_cadastro == "validar_codigo":
-            email_atual = st.session_state.email_em_verificacao
-            st.info(f"Insira o código de 6 dígitos enviado para **{email_atual}**:")
-            
-            with st.form("form_codigo"):
-                codigo_in = st.text_input("Código de 6 Dígitos", max_chars=6).strip()
-                btn_valida = st.form_submit_button("Confirmar Código")
-                
-                if btn_valida:
-                    usuarios = carregar_usuarios()
-                    u_dados = usuarios.get(email_atual, {})
+                    senha_h = gerar_hash_senha(senha)
                     
-                    if codigo_in == u_dados.get("codigo_verificacao"):
-                        usuarios[email_atual]["email_verificado"] = True
-                        usuarios[email_atual]["status"] = "pendente_aprovação_admin"
-                        usuarios[email_atual]["codigo_verificacao"] = None
-                        salvar_usuarios(usuarios)
-                        
-                        st.success("✅ E-mail confirmado! Sua conta foi enviada para validação do Administrador.")
-                        st.session_state.etapa_cadastro = "formulario"
-                        st.session_state.email_em_verificacao = None
+                    if usuario in usuarios:
+                        u = usuarios[usuario]
+                        if u["senha"] == senha_h:
+                            if u.get("status") == "ativo":
+                                st.session_state.usuario_logado = {
+                                    "email": usuario, "nome": u["nome"], "cargo": u["cargo"]
+                                }
+                                st.success(f"Bem-vindo(a), {u['nome']}!")
+                                st.rerun()
+                            elif u.get("status") == "pendente_email":
+                                st.warning("E-mail não verificado. Refaça o cadastro para validar.")
+                            elif u.get("status") == "pendente_aprovação_admin":
+                                st.info("E-mail verificado! Aguardando aprovação do Administrador.")
+                        else:
+                            st.error("Senha incorreta.")
                     else:
-                        st.error("Código inválido. Tente novamente.")
-            
-            if st.button("⬅️ Voltar / Reenviar"):
-                st.session_state.etapa_cadastro = "formulario"
-                st.session_state.email_em_verificacao = None
-                st.rerun()
+                        st.error("Usuário não encontrado.")
+
+        with aba_esqueci:
+            with st.form("form_esqueci"):
+                email_rec = st.text_input("Digite o e-mail cadastrado").strip().lower()
+                btn_recuperar = st.form_submit_button("Recuperar Acesso")
+                
+                if btn_recuperar:
+                    usuarios = carregar_usuarios()
+                    if email_rec in usuarios:
+                        st.info("Instruções de recuperação foram enviadas para o seu e-mail.")
+                    else:
+                        st.error("E-mail não encontrado.")
+
+        with aba_cadastro:
+            if st.session_state.etapa_cadastro == "formulario":
+                with st.form("form_criar"):
+                    nome = st.text_input("Nome Completo")
+                    email = st.text_input("E-mail Corporativo").strip().lower()
+                    senha = st.text_input("Crie uma Senha", type="password")
+                    btn_cadastrar = st.form_submit_button("Enviar e Enviar Código")
+                    
+                    if btn_cadastrar:
+                        usuarios = carregar_usuarios()
+                        if not nome or not email or not senha:
+                            st.warning("Preencha todos os campos obrigatórios.")
+                        elif email in usuarios and usuarios[email].get("status") == "ativo":
+                            st.error("E-mail já cadastrado e ativo.")
+                        else:
+                            codigo = gerar_codigo_verificacao()
+                            usuarios[email] = {
+                                "nome": nome,
+                                "senha": gerar_hash_senha(senha),
+                                "cargo": "Operador",
+                                "status": "pendente_email",
+                                "codigo_verificacao": codigo,
+                                "email_verificado": False
+                            }
+                            salvar_usuarios(usuarios)
+                            
+                            ok, msg = enviar_codigo_email(email, codigo)
+                            if ok:
+                                st.session_state.email_em_verificacao = email
+                                st.session_state.etapa_cadastro = "validar_codigo"
+                                st.success("Código enviado para o seu e-mail!")
+                                st.rerun()
+                            else:
+                                st.error(f"Erro ao enviar o e-mail: {msg}")
+
+            elif st.session_state.etapa_cadastro == "validar_codigo":
+                email_atual = st.session_state.email_em_verificacao
+                st.info(f"Insira o código de 6 dígitos enviado para **{email_atual}**:")
+                
+                with st.form("form_codigo"):
+                    codigo_in = st.text_input("Código de 6 Dígitos", max_chars=6).strip()
+                    btn_valida = st.form_submit_button("Confirmar Código")
+                    
+                    if btn_valida:
+                        usuarios = carregar_usuarios()
+                        u_dados = usuarios.get(email_atual, {})
+                        
+                        if codigo_in == u_dados.get("codigo_verificacao"):
+                            usuarios[email_atual]["email_verificado"] = True
+                            usuarios[email_atual]["status"] = "pendente_aprovação_admin"
+                            usuarios[email_atual]["codigo_verificacao"] = None
+                            salvar_usuarios(usuarios)
+                            
+                            st.success("✅ E-mail confirmado! Aguardando aprovação do Administrador.")
+                            st.session_state.etapa_cadastro = "formulario"
+                            st.session_state.email_em_verificacao = None
+                        else:
+                            st.error("Código inválido. Tente novamente.")
+                
+                if st.button("⬅️ Voltar / Reenviar"):
+                    st.session_state.etapa_cadastro = "formulario"
+                    st.session_state.email_em_verificacao = None
+                    st.rerun()
 
 # ==============================================================================
-# PAINÉIS OPERADOR & ADMIN
+# PAINEL DE OPERAÇÃO / DASHBOARD (LAYOUT ORIGINAL DE 2 COLUNAS)
 # ==============================================================================
-def renderizar_painel_operador():
-    st.title("✂️ Processamento de Etiquetas")
-    st.write(f"Usuário: **{st.session_state.usuario_logado['nome']}**")
+def renderizar_ferramenta_recorte():
+    col_upload, col_painel = st.columns([2.2, 1])
     
-    up = st.file_uploader("Carregar imagem da etiqueta", type=["jpg", "png", "jpeg"])
-    if up:
-        bytes_img = up.getvalue()
-        c1, c2 = st.columns(2)
-        with c1:
-            st.image(bytes_img, use_container_width=True)
-        with c2:
-            res = processar_etiqueta(bytes_img)
-            for i, r in enumerate(res):
-                st.image(r["imagem"], caption=f"Recorte #{i+1}")
-                st.text_area(f"Texto #{i+1}", r["texto"])
+    total_fotos = 0
+    total_recortes = 0
+    
+    with col_upload:
+        arquivos = st.file_uploader(
+            "📁 Selecione ou arraste o lote de fotos aqui", 
+            type=["jpg", "png", "jpeg"], 
+            accept_multiple_files=True
+        )
+        
+        if arquivos:
+            total_fotos = len(arquivos)
+            st.write("---")
+            for idx, arq in enumerate(arquivos):
+                bytes_img = arq.getvalue()
+                res = processar_etiqueta(bytes_img)
+                total_recortes += len(res)
+                
+                st.markdown(f"### 📷 Foto #{idx+1}: {arq.name}")
+                c_original, c_recortes = st.columns(2)
+                with c_original:
+                    st.image(bytes_img, use_container_width=True, caption="Original")
+                with c_recortes:
+                    for i, r in enumerate(res):
+                        st.image(r["imagem"], caption=f"Recorte #{i+1}")
+                        st.text_area(f"Texto #{i+1}", r["texto"], key=f"txt_{idx}_{i}")
+
+    with col_painel:
+        st.markdown("### 📊 Painel do Lote")
+        
+        st.markdown(f"""
+            <div class="stat-card">
+                <div class="stat-number">{total_fotos}</div>
+                <div class="stat-label">Fotos Carregadas</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">{total_recortes}</div>
+                <div class="stat-label">Recortes Prontos</div>
+            </div>
+        """, unsafe_allow_html=True)
 
 def renderizar_painel_admin():
-    st.title("⚙️ Gerenciamento do Sistema")
+    st.markdown("### ⚙️ Painel do Administrador")
     t1, t2 = st.tabs(["Aprovação de Usuários", "Configuração SMTP"])
     
     with t1:
@@ -419,28 +447,50 @@ def renderizar_painel_admin():
                 st.success("Configurações salvas!")
 
 # ==============================================================================
-# ROUTER PRINCIPAL
+# ROUTER PRINCIPAL (CABEÇALHO FIXO + NAVEGAÇÃO SUPERIOR)
 # ==============================================================================
 def main():
     if not st.session_state.usuario_logado:
         renderizar_autenticacao()
     else:
-        st.sidebar.title("Menu")
-        st.sidebar.write(f"👤 {st.session_state.usuario_logado['nome']}")
+        # Cabeçalho Principal (Igual à Foto 2)
+        c_head1, c_head2 = st.columns([1, 4])
+        with c_head1:
+            st.markdown("<h1 style='font-size: 38px; margin: 0;'>LOGO</h1>", unsafe_allow_html=True)
+        with c_head2:
+            st.markdown("""
+                <h1 style='font-size: 32px; margin: 0;'>Recorte de Etiquetas</h1>
+                <p style='color: #a1a1a6; margin-top: 5px;'>Envie as fotos das etiquetas para processamento e recorte automático em lote.</p>
+            """, unsafe_allow_html=True)
+
+        st.write("")
         
+        # Botão de Sair no topo direito / perfil
+        user_nome = st.session_state.usuario_logado['nome']
         cargo = st.session_state.usuario_logado["cargo"]
+        
+        # Navegação por Abas para Administrador ou Direto para Operador
         if cargo == "Administrador":
-            opt = st.sidebar.radio("Navegar", ["Operador", "Admin"])
-            if opt == "Operador":
-                renderizar_painel_operador()
-            else:
+            tab_recorte, tab_admin = st.tabs(["✂️ Ferramenta de Recorte", "👑 Painel do Administrador"])
+            with tab_recorte:
+                renderizar_ferramenta_recorte()
+            with tab_admin:
                 renderizar_painel_admin()
         else:
-            renderizar_painel_operador()
-            
-        if st.sidebar.button("Sair"):
+            renderizar_ferramenta_recorte()
+
+        # Botão discreto para deslogar
+        st.write("")
+        if st.button("🚪 Sair do Sistema", key="btn_logout_top"):
             st.session_state.usuario_logado = None
             st.rerun()
+
+    # Rodapé estilo Foto 2
+    st.markdown("""
+        <div class="footer-text">
+            Desenvolvido por <b>Diego Costa</b>
+        </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
