@@ -98,9 +98,8 @@ ARQUIVO_USUARIOS = "usuarios.json"
 ARQUIVO_SMTP = "config_smtp.json"
 MODELO_YOLO_PATH = "best.pt"
 
-# ⚠️ AJUSTE AQUI PARA O LINK CORRETO DO SEU SERVIDOR / STREAMLIT CLOUD
-# Exemplo local: "http://localhost:8501" ou o link do Streamlit Cloud
-URL_APLICACAO = "https://recorteetiquetas.streamlit.app/"
+# Link da sua aplicação hospedada no Streamlit Cloud
+URL_APLICACAO = "https://recorteetiquetastcia.streamlit.app"
 
 if os.name == 'nt':
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -210,42 +209,51 @@ def converter_imagem_para_bytes(img_rgb):
     return None
 
 # ==============================================================================
-# DETECTOR EXCLUSIVO DE ETIQUETAS COM CÓDIGO DE BARRAS (EMBRATEL/PATRIMÔNIO)
+# DETECTOR EXCLUSIVO E SEGURO DE ETIQUETAS (EMBRATEL/PATRIMÔNIO)
 # ==============================================================================
 def recortar_somente_etiquetas_validas(imagem_bytes):
     image_np = np.frombuffer(imagem_bytes, np.uint8)
     img_bgr = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
+    if img_bgr is None:
+        return []
+
     h_orig, w_orig = img_bgr.shape[:2]
-    
     recortes_encontrados = []
 
-    # 1. Detector NATIVO de Código de Barras do OpenCV
-    detector = cv2.BarcodeDetector()
-    ok, _, _, points = detector.detectAndDecode(img_bgr)
-    
-    if ok and points is not None:
-        for pts in points:
-            pts = pts.astype(int)
-            x_min, y_min = np.min(pts, axis=0)
-            x_max, y_max = np.max(pts, axis=0)
-            
-            # Expande a caixa para abranger o logo azul acima e os números abaixo
-            pad_w = int((x_max - x_min) * 0.25)
-            pad_h = int((y_max - y_min) * 1.40)
-            
-            x1 = max(0, x_min - pad_w)
-            y1 = max(0, y_min - pad_h)
-            x2 = min(w_orig, x_max + pad_w)
-            y2 = min(h_orig, y_max + pad_h)
-            
-            crop = img_bgr[y1:y2, x1:x2]
-            if crop.size > 0:
-                recortes_encontrados.append({
-                    "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
-                    "box": (x1, y1, x2, y2)
-                })
+    # 1. Tenta usar o Detector de Código de Barras do OpenCV de forma segura (compatível com Linux/Windows)
+    try:
+        detector = None
+        if hasattr(cv2, 'barcode') and hasattr(cv2.barcode, 'BarcodeDetector'):
+            detector = cv2.barcode.BarcodeDetector()
+        elif hasattr(cv2, 'BarcodeDetector'):
+            detector = cv2.BarcodeDetector()
 
-    # 2. Se a detecção falhar, aplica filtro morfológico restrito a retângulos bem largos
+        if detector is not None:
+            ok, _, _, points = detector.detectAndDecode(img_bgr)
+            if ok and points is not None:
+                for pts in points:
+                    pts = pts.astype(int)
+                    x_min, y_min = np.min(pts, axis=0)
+                    x_max, y_max = np.max(pts, axis=0)
+                    
+                    pad_w = int((x_max - x_min) * 0.25)
+                    pad_h = int((y_max - y_min) * 1.40)
+                    
+                    x1 = max(0, x_min - pad_w)
+                    y1 = max(0, y_min - pad_h)
+                    x2 = min(w_orig, x_max + pad_w)
+                    y2 = min(h_orig, y_max + pad_h)
+                    
+                    crop = img_bgr[y1:y2, x1:x2]
+                    if crop.size > 0:
+                        recortes_encontrados.append({
+                            "imagem": cv2.cvtColor(crop, cv2.COLOR_BGR2RGB),
+                            "box": (x1, y1, x2, y2)
+                        })
+    except Exception:
+        pass
+
+    # 2. Análise Morfológica Restrita a Etiquetas Retangulares (Padrão Embratel)
     if not recortes_encontrados:
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 7))
@@ -260,8 +268,7 @@ def recortar_somente_etiquetas_validas(imagem_bytes):
             aspect_ratio = float(w) / max(h, 1)
             area = w * h
             
-            # Requisitos estritos: retângulo bem horizontal (largura > 2x altura)
-            if aspect_ratio >= 2.0 and area > (w_orig * h_orig * 0.008):
+            if aspect_ratio >= 1.9 and area > (w_orig * h_orig * 0.006):
                 x1, y1 = max(0, x - 10), max(0, y - 10)
                 x2, y2 = min(w_orig, x + w + 10), min(h_orig, y + h + 10)
                 
@@ -272,7 +279,7 @@ def recortar_somente_etiquetas_validas(imagem_bytes):
                         "box": (x1, y1, x2, y2)
                     })
 
-    # Retorna SOMENTE os recortes que bateram com o padrão (zero imagens inteiras de fallback)
+    # Retorna SOMENTE recortes validados (sem imagens inteiras como fallback)
     return recortes_encontrados
 
 # ==============================================================================
@@ -471,7 +478,6 @@ def renderizar_ferramenta_recorte():
             </div>
         """, unsafe_allow_html=True)
 
-        # O ZIP SÓ CONTERÁ AS ETIQUETAS FILTRADAS
         if todos_recortes_bytes:
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
