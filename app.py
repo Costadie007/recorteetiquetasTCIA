@@ -415,7 +415,7 @@ def renderizar_ferramenta_recorte():
                 status_texto.empty()
                 barra_progresso.empty()
                 st.session_state.recortes_lote = recortes
-                st.success(f"⚡ Sucesso! {len(recortes)} de {total} etiquetas foram recortadas automaticamente pelo best.pt.")
+                st.success(f"⚡ Sucesso! {len(recortes)} de {total} etiquetas foram recortadas")
             
             # Pré-visualização se o processamento já tiver sido feito
             if st.session_state.recortes_lote:
