@@ -24,7 +24,7 @@ except ImportError:
 # CONFIGURAÇÕES DA PÁGINA (WIDE) E CSS CUSTOMIZADO
 # ==============================================================================
 st.set_page_config(
-    page_title="Recorte de Etiquetas EMBRATEL",
+    page_title="Recorte de Etiquetas",
     page_icon="✂️",
     layout="wide"
 )
