@@ -13,7 +13,7 @@ import zipfile
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# Importação da Inteligência Artificial YOLO
+# Importação da Inteligência IA YOLO
 try:
     from ultralytics import YOLO
     YOLO_DISPONIVEL = True
@@ -110,10 +110,8 @@ def carregar_modelo_yolo():
     if not YOLO_DISPONIVEL:
         return None
     try:
-        # Carrega o modelo treinado que está no seu repositório GitHub
         if os.path.exists("best.pt"):
             return YOLO("best.pt")
-        # Fallback de segurança se o arquivo não estiver presente na raiz
         return YOLO("yolov8n.pt")
     except Exception as e:
         st.error(f"Erro ao carregar o modelo YOLO (best.pt): {e}")
@@ -186,7 +184,7 @@ def enviar_codigo_email(email_destino, codigo):
     corpo = f"""
     <div style="font-family: Arial, sans-serif; background-color: #2c2c2e; color: #ffffff; padding: 20px; border-radius: 8px;">
         <h2 style="color: #ff9500;">Código de Verificação</h2>
-        <p>Seu código para validar o e-mail no Recorte de Etiquetas é:</p>
+        <p>Seu código para validar a solicitação no Recorte de Etiquetas é:</p>
         <div style="background-color: #1c1c1e; font-size: 32px; font-weight: bold; color: #ff9500; padding: 15px; text-align: center; letter-spacing: 8px; border-radius: 8px; width: 200px;">
             {codigo}
         </div>
@@ -237,7 +235,6 @@ def extrair_candidatos_etiqueta(imagem_bytes):
     
     # 1. PROCESSAMENTO VIA MODELO TREINADO (best.pt)
     if modelo is not None:
-        # iou=0.5 agrupa caixas duplicadas na mesma etiqueta
         resultados = modelo(img_bgr, conf=0.25, iou=0.5, verbose=False)
         
         deteccoes = []
@@ -247,7 +244,6 @@ def extrair_candidatos_etiqueta(imagem_bytes):
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 deteccoes.append((conf, x1, y1, x2, y2))
         
-        # Ordena para garantir que a opção de maior confiança fique no topo (posição 0)
         deteccoes.sort(key=lambda item: item[0], reverse=True)
         
         for conf, x1, y1, x2, y2 in deteccoes:
@@ -266,7 +262,7 @@ def extrair_candidatos_etiqueta(imagem_bytes):
                     "confianca": conf
                 })
 
-    # 2. FALLBACK SECUNDÁRIO OPENCV (Se o best.pt não achar nada)
+    # 2. FALLBACK SECUNDÁRIO OPENCV
     if not candidatos:
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
         clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
@@ -306,6 +302,10 @@ if "etapa_cadastro" not in st.session_state:
     st.session_state.etapa_cadastro = "formulario"
 if "email_em_verificacao" not in st.session_state:
     st.session_state.email_em_verificacao = None
+if "etapa_esqueci" not in st.session_state:
+    st.session_state.etapa_esqueci = "solicitar"
+if "email_esqueci" not in st.session_state:
+    st.session_state.email_esqueci = None
 if "recortes_lote" not in st.session_state:
     st.session_state.recortes_lote = []
 
@@ -341,6 +341,69 @@ def renderizar_autenticacao():
                     else:
                         st.error("Usuário não encontrado.")
 
+        with aba_esqueci:
+            if st.session_state.etapa_esqueci == "solicitar":
+                with st.form("form_esqueci_solicitar"):
+                    st.markdown("##### Redefinição de Senha")
+                    st.caption("Digite seu e-mail cadastrado para receber o código de verificação.")
+                    email_req = st.text_input("E-mail").strip().lower()
+                    btn_solicitar = st.form_submit_button("Enviar Código por E-mail")
+
+                    if btn_solicitar:
+                        usuarios = carregar_usuarios()
+                        if email_req in usuarios:
+                            codigo = gerar_codigo_verificacao()
+                            usuarios[email_req]["codigo_recuperacao"] = codigo
+                            salvar_usuarios(usuarios)
+                            
+                            ok, msg = enviar_codigo_email(email_req, codigo)
+                            if ok:
+                                st.session_state.email_esqueci = email_req
+                                st.session_state.etapa_esqueci = "validar"
+                                st.success("Código enviado para o seu e-mail!")
+                                st.rerun()
+                            else:
+                                st.error(f"Erro ao enviar o e-mail: {msg}")
+                        else:
+                            st.error("E-mail não cadastrado no sistema.")
+
+            elif st.session_state.etapa_esqueci == "validar":
+                with st.form("form_esqueci_validar"):
+                    st.markdown("##### Digite o Código e a Nova Senha")
+                    st.info(f"Código enviado para: **{st.session_state.email_esqueci}**")
+                    codigo_in = st.text_input("Código de 6 dígitos", max_chars=6).strip()
+                    nova_senha = st.text_input("Nova Senha", type="password")
+                    confirma_senha = st.text_input("Confirme a Nova Senha", type="password")
+                    
+                    col_btn1, col_btn2 = st.columns([1, 1])
+                    with col_btn1:
+                        btn_alterar = st.form_submit_button("Redefinir Senha")
+                    with col_btn2:
+                        btn_voltar = st.form_submit_button("Voltar")
+
+                    if btn_voltar:
+                        st.session_state.etapa_esqueci = "solicitar"
+                        st.session_state.email_esqueci = None
+                        st.rerun()
+
+                    if btn_alterar:
+                        if nova_senha != confirma_senha:
+                            st.error("As senhas não coincidem.")
+                        elif len(nova_senha) < 4:
+                            st.error("A nova senha deve ter pelo menos 4 caracteres.")
+                        else:
+                            usuarios = carregar_usuarios()
+                            user_data = usuarios.get(st.session_state.email_esqueci, {})
+                            if codigo_in == user_data.get("codigo_recuperacao"):
+                                usuarios[st.session_state.email_esqueci]["senha"] = gerar_hash_senha(nova_senha)
+                                usuarios[st.session_state.email_esqueci].pop("codigo_recuperacao", None)
+                                salvar_usuarios(usuarios)
+                                st.success("✅ Senha redefinida com sucesso! Faça login na aba 'Entrar'.")
+                                st.session_state.etapa_esqueci = "solicitar"
+                                st.session_state.email_esqueci = None
+                            else:
+                                st.error("Código de verificação incorreto.")
+
         with aba_cadastro:
             if st.session_state.etapa_cadastro == "formulario":
                 with st.form("form_criar"):
@@ -362,6 +425,8 @@ def renderizar_autenticacao():
                             st.session_state.email_em_verificacao = email
                             st.session_state.etapa_cadastro = "validar_codigo"
                             st.rerun()
+                        else:
+                            st.error(f"Erro ao enviar o e-mail: {msg}")
 
             elif st.session_state.etapa_cadastro == "validar_codigo":
                 with st.form("form_codigo"):
@@ -376,6 +441,8 @@ def renderizar_autenticacao():
                             st.success("✅ E-mail verificado! Aguarde a aprovação do Admin.")
                             st.session_state.etapa_cadastro = "formulario"
                             st.rerun()
+                        else:
+                            st.error("Código inválido.")
 
 # ==============================================================================
 # FERRAMENTA DE RECORTE (COM BOTÃO DE DISPARO E PROCESSAMENTO EM LOTE)
@@ -394,7 +461,6 @@ def renderizar_ferramenta_recorte():
             total = len(arquivos)
             st.info(f"📌 **{total} fotos** carregadas e prontas para processamento.")
             
-            # BOTÃO PARA DISPARAR O RECORTE DO LOTE INTEIRO DE UMA VEZ
             if st.button("🚀 INICIAR RECORTE AUTOMÁTICO", key="btn_iniciar_recorte"):
                 recortes = []
                 barra_progresso = st.progress(0)
@@ -406,7 +472,6 @@ def renderizar_ferramenta_recorte():
                     candidatos = extrair_candidatos_etiqueta(bytes_img)
                     
                     if candidatos:
-                        # Seleciona automaticamente o melhor resultado detectado pelo best.pt
                         melhor_crop = candidatos[0]["imagem"]
                         recortes.append((f"etiqueta_{idx+1}_{arq.name}", converter_imagem_para_bytes(melhor_crop)))
                     
@@ -417,7 +482,6 @@ def renderizar_ferramenta_recorte():
                 st.session_state.recortes_lote = recortes
                 st.success(f"⚡ Sucesso! {len(recortes)} de {total} etiquetas foram recortadas")
             
-            # Pré-visualização se o processamento já tiver sido feito
             if st.session_state.recortes_lote:
                 st.write("---")
                 st.markdown("##### 👁️ Amostra das Etiquetas Recortadas")
