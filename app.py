@@ -385,7 +385,7 @@ def renderizar_ferramenta_recorte():
     
     with col_upload:
         arquivos = st.file_uploader(
-            "📁 Selecione as fotos do lote (Embratel / Código de Barras)", 
+            "📁 Selecione as fotos do lote", 
             type=["jpg", "png", "jpeg"], 
             accept_multiple_files=True
         )
