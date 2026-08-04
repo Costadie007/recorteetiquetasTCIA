@@ -315,7 +315,7 @@ def renderizar_autenticacao():
         st.markdown("""
             <div style="text-align: center; margin-bottom: 30px; margin-top: 40px;">
                 <h1 style="font-size: 36px; font-weight: bold; margin: 0;">LOGO &nbsp;&nbsp;&nbsp;&nbsp; Recorte de Etiquetas</h1>
-                <p style="color: #a1a1a6; font-size: 14px; margin-top: 10px;">Acesse para recortar e baixar etiquetas Embratel / Códigos de Barras</p>
+                <p style="color: #a1a1a6; font-size: 14px; margin-top: 10px;">Acesse para recortar as etiquetas </p>
             </div>
         """, unsafe_allow_html=True)
 
