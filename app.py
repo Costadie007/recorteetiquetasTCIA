@@ -532,7 +532,7 @@ def main():
         with c_head2:
             st.markdown("""
                 <h1 style='font-size: 32px; margin: 0;'>Recorte de Etiquetas</h1>
-                <p style='color: #a1a1a6; margin-top: 5px;'>Identificador e extrator inteligente de etiquetas via IA YOLOv8.</p>
+                <p style='color: #a1a1a6; margin-top: 5px;'>Recortador inteligente de etiquetas.</p>
             """, unsafe_allow_html=True)
 
         cargo = st.session_state.usuario_logado["cargo"]
